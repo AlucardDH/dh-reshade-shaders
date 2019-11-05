@@ -22,7 +22,7 @@ For example :
 ## DH_Uniformity_correction
 This shader tries to correct screen uniformity.
 
-### HOW TOFor example :
+### HOW TO
 
 1. Run a game with ReShade and the shader enabled, check "Solid color", set "Correction" to 0 and set "Brightness" to a value that shows imperfections the best
 
