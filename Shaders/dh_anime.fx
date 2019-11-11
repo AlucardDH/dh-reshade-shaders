@@ -134,7 +134,7 @@ namespace DHAnime {
 
 //// PS
 
-	void PS_Input(in float2 coords : TEXCOORD0, out float4 outNormal : SV_Target, out float4 outBlur : SV_Target1)
+	void PS_Input(float4 vpos : SV_Position, in float2 coords : TEXCOORD0, out float4 outNormal : SV_Target, out float4 outBlur : SV_Target1)
 	{
 		float3 normal = normal(coords);
 		saveNormal(normal,outNormal);
@@ -168,7 +168,7 @@ namespace DHAnime {
 		}
 	}
 
-	void PS_Manga(in float2 coords : TEXCOORD0, out float4 outPixel : SV_Target)
+	void PS_Manga(float4 vpos : SV_Position, in float2 coords : TEXCOORD0, out float4 outPixel : SV_Target)
 	{
 		// black line
 		if(iBlackLineThickness>0) {

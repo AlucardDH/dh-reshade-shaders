@@ -37,7 +37,7 @@ namespace DHUniformityCorrection {
 
 //// PS
 
-	void PS_Correction(in float2 coords : TEXCOORD0, out float4 outPixel : SV_Target)
+	void PS_Correction(float4 vpos : SV_Position, in float2 coords : TEXCOORD0, out float4 outPixel : SV_Target)
 	{
 		float4 color;
 		if(bSolidColor) {
