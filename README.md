@@ -19,6 +19,7 @@ For example :
 ![Skyrim - DH_Anime](screenshots/dh_anime/TESV%202019-11-05%2013-57-14.png?raw=true "Skyrim - DH_Anime")
 ![Skyrim - DH_Anime](screenshots/dh_anime/TESV%202019-11-05%2013-57-31.png?raw=true "Skyrim - DH_Anime")
 
+
 ## DH_Undither
 This shader reduces dithering.
 It doesn't use Depth Buffer so it can be used with DosBox in old games.
@@ -27,6 +28,10 @@ For example :
 ### Little Big Adventure 2
 ![DH_Undither](screenshots/dh_undither/dh_undither1.png?raw=true "DH_Undither")
 ![DH_Undither](screenshots/dh_undither/dh_undither2.png?raw=true "DH_Undither")
+
+
+## DH_Uniformity_correction
+This shader tries to correct screen uniformity.
 
 ### HOW TO
 
