@@ -5,6 +5,14 @@ namespace DH {
 
 //// uniform
 
+	uniform int iPS <
+		ui_label = "Pixel size";
+		ui_type = "slider";
+	    ui_min = 1;
+	    ui_max = 4;
+	    ui_step = 1;
+	> = 1;
+
 	uniform int iRadius <
 		ui_label = "Radius";
 		ui_type = "slider";
@@ -73,7 +81,7 @@ namespace DH {
 		float3 hsl = RGBtoHSL(rgb);
 
 		float maxDist = iRadius*iRadius;
-		float2 pixelSize = getPixelSize();
+		float2 pixelSize = getPixelSize()*iPS;
 
 		float2 minCoords = saturate(coords-iRadius*pixelSize);
 		float2 maxCoords = saturate(coords+iRadius*pixelSize);
