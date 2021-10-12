@@ -1,6 +1,16 @@
 # dh-reshade-shaders
 Shaders for ReShade injector
 
+## DH_Lain
+This shader tries to reproduce the design of the shadows from the Anime "Serial Experiment Lain".
+
+For example :
+### Half-life
+![DH_Lain](screenshots/dh_lain/hl_original.png?raw=true "DH_Lain")
+![DH_Lain](screenshots/dh_lain/hl_lain.png?raw=true "DH_Lain")
+
+
+
 ## DH_Anime
 This shader can be used to create drawing/anime/manga effects :
 - lining
