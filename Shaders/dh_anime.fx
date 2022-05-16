@@ -1,11 +1,17 @@
 #include "Reshade.fxh"
 
+#define NOISE_SIZE 16
+#define BUFFER_SIZE int2(BUFFER_WIDTH,BUFFER_HEIGHT)
 #define getColor(c) tex2Dlod(ReShade::BackBuffer,float4(c,0.0,0.0))
 #define getBlur(c) tex2Dlod(blurSampler,float4(c,0.0,0.0))
 #define getDepth(c) ReShade::GetLinearizedDepth(c)*RESHADE_DEPTH_LINEARIZATION_FAR_PLANE
 #define diff3t(v1,v2,t) (abs(v1.x-v2.x)>t || abs(v1.y-v2.y)>t || abs(v1.z-v2.z)>t)
 
 namespace DHAnime {
+
+	texture blueNoiseTex < source ="dh_bluenoise.png" ; > { Width = NOISE_SIZE; Height = NOISE_SIZE; MipLevels = 1; Format = RGBA8; };
+    sampler blueNoiseSampler { Texture = blueNoiseTex;  AddressU = REPEAT;	AddressV = REPEAT;	AddressW = REPEAT;};
+
 
 //// uniform
 
@@ -52,6 +58,11 @@ namespace DHAnime {
 	    ui_max = 255;
 	    ui_step = 1;
 	> = 16;
+	
+	uniform bool bDithering <
+	    ui_category = "Colors";
+		ui_label = "Dithering";
+	> = false;
 
 //// textures
 
@@ -199,7 +210,28 @@ namespace DHAnime {
 		
 		// shading steps
 		float stepSize = 1.0/iShadingSteps;
-		hsl.z = round(hsl.z/stepSize)/iShadingSteps;
+		if(bDithering) {
+			int2 coordsNoise = int2(coords*BUFFER_SIZE)%NOISE_SIZE;
+			float noise = tex2Dfetch(blueNoiseSampler,coordsNoise).r;
+			
+			float exact = (hsl.z/stepSize)/iShadingSteps;
+			float ceiled = ceil(hsl.z/stepSize)/iShadingSteps;
+			float rounded = round(hsl.z/stepSize)/iShadingSteps;
+			float floored = floor(hsl.z/stepSize)/iShadingSteps;
+			
+			float ditherRatio = min(ceiled-exact,exact-floored)/stepSize;
+			float dithered = ceiled-exact<exact-floored 
+				? ceiled
+				: floored;
+				
+			if(noise>0.7) {
+				hsl.z = dithered;
+			} else {
+				hsl.z = exact;
+			}
+		} else {
+			hsl.z = round(hsl.z/stepSize)/iShadingSteps;
+		}
 
 		// saturation
 		hsl.y = clamp(hsl.y*fSaturation,0,1);
