@@ -33,18 +33,15 @@
 
 #define diffT(v1,v2,t) !any(max(abs(v1-v2)-t,0))
 
-namespace DHRTGI2 {
+namespace DHRTGI {
 
     texture blueNoiseTex < source ="dh_rt_noise.png" ; > { Width = NOISE_SIZE; Height = NOISE_SIZE; MipLevels = 1; Format = RGBA8; };
-    sampler blueNoiseSampler { Texture = blueNoiseTex;  AddressU = REPEAT;  AddressV = REPEAT;  AddressW = REPEAT;};
+    sampler blueNoiseSampler { Texture = blueNoiseTex;  AddressU = REPEAT;	AddressV = REPEAT;	AddressW = REPEAT;};
 
     texture normalTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8; };
     sampler normalSampler { Texture = normalTex;};
-    
-    texture depthTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = R32F; };
-    sampler depthSampler { Texture = depthTex; };
 
-    texture previousDepthTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = R32F; };
+	texture previousDepthTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = R32F; };
     sampler previousDepthSampler { Texture = previousDepthTex; };
 
     texture lightPassTex { Width = RENDER_WIDTH; Height = RENDER_HEIGHT; Format = RGBA8; MipLevels = 4; };
@@ -56,30 +53,30 @@ namespace DHRTGI2 {
     texture lightPassAOTex { Width = RENDER_WIDTH; Height = RENDER_HEIGHT; Format = RGBA8; MipLevels = 4; };
     sampler lightPassAOSampler { Texture = lightPassAOTex; MinLOD = 0.0f; MaxLOD = 3.0f;};
 
-    texture smoothPassTex { Width = RENDER_WIDTH; Height = RENDER_HEIGHT; Format = RGBA8; MipLevels = 4; };
+    texture fillGapPass1Tex { Width = RENDER_WIDTH/2; Height = RENDER_HEIGHT/2; Format = RGBA8; MipLevels = 4; };
+    sampler fillGapPass1Sampler { Texture = fillGapPass1Tex; MinLOD = 0.0f; MaxLOD = 3.0f;};
+
+    texture fillGapPass2Tex { Width = RENDER_WIDTH/4; Height = RENDER_HEIGHT/4; Format = RGBA8; MipLevels = 4; };
+    sampler fillGapPass2Sampler { Texture = fillGapPass2Tex; MinLOD = 0.0f; MaxLOD = 3.0f;};
+	
+	texture fillGapPass3Tex { Width = RENDER_WIDTH/8; Height = RENDER_HEIGHT/8; Format = RGBA8; MipLevels = 4; };
+    sampler fillGapPass3Sampler { Texture = fillGapPass3Tex; MinLOD = 0.0f; MaxLOD = 3.0f;};
+
+	texture smoothPassTex { Width = RENDER_WIDTH; Height = RENDER_HEIGHT; Format = RGBA8; MipLevels = 4; };
     sampler smoothPassSampler { Texture = smoothPassTex; MinLOD = 0.0f; MaxLOD = 3.0f;};
-    
+	
     texture smoothAOPassTex { Width = RENDER_WIDTH; Height = RENDER_HEIGHT; Format = RGBA8; MipLevels = 4; };
     sampler smoothAOPassSampler { Texture = smoothAOPassTex; MinLOD = 0.0f; MaxLOD = 3.0f; };
     
-    texture smoothPass2Tex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8; MipLevels = 4; };
-    sampler smoothPass2Sampler { Texture = smoothPass2Tex; MinLOD = 0.0f; MaxLOD = 3.0f; };
-
-    texture smoothAOPass2Tex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8; MipLevels = 4; };
-    sampler smoothAOPass2Sampler { Texture = smoothAOPass2Tex; MinLOD = 0.0f; MaxLOD = 3.0f; };
-    
-    texture smoothPass3Tex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8; MipLevels = 4; };
-    sampler smoothPass3Sampler { Texture = smoothPass3Tex; MinLOD = 0.0f; MaxLOD = 3.0f; };
-
-    texture smoothAOPass3Tex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8; };
-    sampler smoothAOPass3Sampler { Texture = smoothAOPass3Tex; MinLOD = 0.0f; MaxLOD = 3.0f; };
+    texture lightAccuTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8; };
+    sampler lightAccuSampler { Texture = lightAccuTex; };
     
     texture resultTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8; };
     sampler resultSampler { Texture = resultTex; };
 
-    uniform float frametime < source = "frametime"; >;
+	uniform float frametime < source = "frametime"; >;
     uniform int framecount < source = "framecount"; >;
-    uniform int random < source = "random"; min = 0; max = NOISE_SIZE; >;
+	uniform int random < source = "random"; min = 0; max = NOISE_SIZE; >;
 
     uniform bool bDebug <
         ui_category = "Setting";
@@ -92,7 +89,7 @@ namespace DHRTGI2 {
         ui_label = "Normal filter";
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.001;
-    > = 0.0;
+    > = 1.0;
     
     
     uniform float fPeviousDepth <
@@ -101,7 +98,7 @@ namespace DHRTGI2 {
         ui_label = "PreviousDepthRecall";
         ui_min = 0.0; ui_max = 0.1;
         ui_step = 0.001;
-    > = 0.01;
+    > = 0.010;
     
     uniform float fBrightnessOpacity <
         ui_type = "slider";
@@ -119,10 +116,18 @@ namespace DHRTGI2 {
         ui_step = 0.1;
     > = 1.0;
 
-    uniform bool bFrameAccuAuto <
+	uniform bool bFrameAccuAuto <
         ui_category = "Setting";
         ui_label = "Temporal accumulation Auto";
-    > = false;
+    > = true;
+    
+    uniform int iFrameAccuAutoTarget <
+        ui_type = "slider";
+        ui_category = "Setting";
+        ui_label = "Temporal accumulation Auto target";
+        ui_min = 30; ui_max = 1000;
+        ui_step = 1;
+    > = 60;
     
     uniform int iFrameAccu <
         ui_type = "slider";
@@ -130,7 +135,7 @@ namespace DHRTGI2 {
         ui_label = "Temporal accumulation";
         ui_min = 1; ui_max = 16;
         ui_step = 1;
-    > = 2;
+    > = 3;
     
     uniform float fSkyDepth <
         ui_type = "slider";
@@ -154,7 +159,7 @@ namespace DHRTGI2 {
         ui_type = "slider";
         ui_category = "Ray tracing";
         ui_label = "Sub pixel jitter";
-        ui_min = 0.0; ui_max = 2.0;
+        ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.1;
     > = 1.0;
     
@@ -197,12 +202,12 @@ namespace DHRTGI2 {
         ui_label = "Ray Hit Depth Threshold";
         ui_min = 0.001; ui_max = 1.0;
         ui_step = 0.001;
-    > = 0.035;
+    > = 0.350;
     
     uniform bool bLightOmnidirectional <
         ui_category = "Light Omnidirectional";
         ui_label = "Enable";
-    > = true;
+    > = false;
     
     uniform float fLightOmnidirectionalThres <
         ui_type = "slider";
@@ -210,15 +215,15 @@ namespace DHRTGI2 {
         ui_label = "Brightness Threshold";
         ui_min = 0.001; ui_max = 1.0;
         ui_step = 0.001;
-    > = 0.850;
+    > = 0.800;
     
-    uniform float fLightOmnidirectionalDepthThres <
+    uniform float fLightOmnidirectionalIntensity <
         ui_type = "slider";
         ui_category = "Light Omnidirectional";
         ui_label = "Intensity/range";
-        ui_min = 0.001; ui_max = 1.0;
+        ui_min = 0.001; ui_max = 5.0;
         ui_step = 0.001;
-    > = 0.4;
+    > = 1.0;
     
     uniform float fLightOmnidirectionalMinPureness <
         ui_type = "slider";
@@ -228,23 +233,23 @@ namespace DHRTGI2 {
         ui_step = 0.001;
     > = 0.150;
     
-    uniform int iLightOmnidirectionalRadius <
-        ui_type = "slider";
-        ui_category = "Light Omnidirectional";
-        ui_label = "Radius";
-        ui_min = 1; ui_max = 16;
-        ui_step = 1;
-    > = 2;
-    
     uniform float fLightOmnidirectionalSaturate <
         ui_type = "slider";
         ui_category = "Light Omnidirectional";
         ui_label = "Saturate";
         ui_min = 0.001; ui_max = 1.0;
         ui_step = 0.001;
-    > = 0.475;
+    > = 0.150;
     
 // LIGHT COLOR
+    
+    uniform float fSkyColor <
+        ui_type = "slider";
+        ui_category = "COLOR";
+        ui_label = "Sky color";
+        ui_min = 0; ui_max = 1.0;
+        ui_step = 0.01;
+    > = 0.15;
     
     uniform float fRayBounce <
         ui_type = "slider";
@@ -252,7 +257,7 @@ namespace DHRTGI2 {
         ui_label = "Bounce strength";
         ui_min = 0; ui_max = 1.0;
         ui_step = 0.01;
-    > = 0.16;
+    > = 0.10;
         
     uniform float fFadePower <
         ui_type = "slider";
@@ -260,7 +265,7 @@ namespace DHRTGI2 {
         ui_label = "Distance Fading";
         ui_min = 0.0; ui_max = 10;
         ui_step = 0.01;
-    > = 0.17;
+    > = 1.5;
     
     uniform float fSaturateColor <
         ui_type = "slider";
@@ -268,7 +273,7 @@ namespace DHRTGI2 {
         ui_label = "Saturate";
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
-    > = 0.10;
+    > = 0.15;
     
     uniform float fSaturateColorPower <
         ui_type = "slider";
@@ -276,7 +281,7 @@ namespace DHRTGI2 {
         ui_label = "Saturate";
         ui_min = 1.0; ui_max = 10.0;
         ui_step = 0.01;
-    > = 2.0;
+    > = 1.75;
     
 // AO
     uniform float fAOMultiplier <
@@ -285,7 +290,7 @@ namespace DHRTGI2 {
         ui_label = "Multiplier";
         ui_min = 0.0; ui_max = 5;
         ui_step = 0.01;
-    > = 0.25;
+    > = 1.5;
     
     uniform int iAODistance <
         ui_type = "slider";
@@ -293,11 +298,21 @@ namespace DHRTGI2 {
         ui_label = "Distance";
         ui_min = 0; ui_max = 16;
         ui_step = 1;
-    > = 4;
+    > = 6;
+    
+    uniform bool bAOProtectLight <
+        ui_category = "AO";
+        ui_label = "Protect light from AO";
+    > = true;
  
     
 // SMOTTHING
 
+    uniform bool bDepthWeight <
+        ui_category = "Smoothing";
+        ui_label = "Depth weight";
+    > = true;
+    
     uniform bool bNormalWeight <
         ui_category = "Smoothing";
         ui_label = "Normal weight";
@@ -319,23 +334,7 @@ namespace DHRTGI2 {
         ui_label = "Radius";
         ui_min = 0; ui_max = 8;
         ui_step = 1;
-    > = 1;
-    
-    uniform int iSmoothLod <
-        ui_type = "slider";
-        ui_category = "Smoothing";
-        ui_label = "Lod";
-        ui_min = 0; ui_max = 3;
-        ui_step = 1;
-    > = 1;
-
-    uniform float fSmoothPass <
-        ui_type = "slider";
-        ui_category = "Smoothing";
-        ui_label = "Pass";
-        ui_min = 1.0; ui_max = 4.0;
-        ui_step = 0.1;
-    > = 3.0;
+    > = 4;
 
     uniform float fSmoothDepthThreshold <
         ui_type = "slider";
@@ -343,7 +342,7 @@ namespace DHRTGI2 {
         ui_label = "Depth Threshold";
         ui_min = 0.01; ui_max = 0.2;
         ui_step = 0.01;
-    > = 0.03;
+    > = 0.02;
 
     uniform float fSmoothNormalThreshold <
         ui_type = "slider";
@@ -355,34 +354,21 @@ namespace DHRTGI2 {
  
 // MERGING
     
-    uniform int iMergingMethod <
-        ui_type = "slider";
-        ui_category = "Merging";
-        ui_label = "Method";
-        ui_min = 0; ui_max = 4;
-        ui_step = 1;
-    > = 0;
-    
-    uniform bool bPurenessMerge <
-        ui_category = "Merging";
-        ui_label = "Pureness";
-    > = false;
-    
     uniform float fSourceColor <
         ui_type = "slider";
         ui_category = "Merging";
         ui_label = "Source color";
         ui_min = 0.1; ui_max = 2;
         ui_step = 0.01;
-    > = 1.0;
+    > = 0.75;
     
-    uniform float fSourceDesat <
+    uniform float fPreservePower <
         ui_type = "slider";
         ui_category = "Merging";
-        ui_label = "Source desat";
-        ui_min = 0.0; ui_max = 1;
+        ui_label = "Preserve source power";
+        ui_min = 0.1; ui_max = 10.0;
         ui_step = 0.01;
-    > = 0.15;
+    > = 3.0;
     
     uniform float fLightMult <
         ui_type = "slider";
@@ -390,7 +376,7 @@ namespace DHRTGI2 {
         ui_label = "Light multiplier";
         ui_min = 0.1; ui_max = 10;
         ui_step = 0.01;
-    > = 1.33;
+    > = 1.75;
     
     uniform float fLightOffset <
         ui_type = "slider";
@@ -398,15 +384,7 @@ namespace DHRTGI2 {
         ui_label = "Light offset";
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
-    > = 0.25;
-    
-    uniform float fMaxLight <
-        ui_type = "slider";
-        ui_category = "Merging";
-        ui_label = "MAx light";
-        ui_min = 0.0; ui_max = 1.0;
-        ui_step = 0.1;
-    > = 1.0;
+    > = 0.65;
     
     uniform float fLightNormalize <
         ui_type = "slider";
@@ -414,7 +392,7 @@ namespace DHRTGI2 {
         ui_label = "Light normalize";
         ui_min = 0.1; ui_max = 4;
         ui_step = 0.01;
-    > = 0.35;
+    > = 0.85;
     
 
     
@@ -464,70 +442,77 @@ namespace DHRTGI2 {
     }
     
     float getFrameAccu() {
-        if(bFrameAccuAuto) {
-            return max(1,round(10.0/frametime));
-        } else {
-            return iFrameAccu;
-        }
+    	if(bFrameAccuAuto) {
+    		float fps = 1000.0/frametime;
+    		return max(1,round(fps/iFrameAccuAutoTarget));
+    	} else {
+    		return iFrameAccu;
+    	}
     }
     
     float maxOf3(float3 a) {
-        return max(max(a.x,a.y),a.z);
-    }
-    
-    float minOf3(float3 a) {
-        return min(min(a.x,a.y),a.z);
-    }
-    
-    float3 max3(float3 a,float3 b) {
-        return float3(max(a.x,b.x),max(a.y,b.y),max(a.z,b.z));
-    }
-    
-    float3 min3(float3 a,float3 b) {
-        return float3(min(a.x,b.x),min(a.y,b.y),min(a.z,b.z));
-    }
+		return max(max(a.x,a.y),a.z);
+	}
+	
+	float minOf3(float3 a) {
+		return min(min(a.x,a.y),a.z);
+	}
+	
+	float3 max3(float3 a,float3 b) {
+		return float3(max(a.x,b.x),max(a.y,b.y),max(a.z,b.z));
+	}
+	
+	float3 min3(float3 a,float3 b) {
+		return float3(min(a.x,b.x),min(a.y,b.y),min(a.z,b.z));
+	}
     
 ////// COORDINATES
 
-    float getDepth(float2 texcoord) {
-#if RESHADE_DEPTH_INPUT_IS_UPSIDE_DOWN
-        texcoord.y = 1.0 - texcoord.y;
-#endif
-        texcoord.x /= RESHADE_DEPTH_INPUT_X_SCALE;
-        texcoord.y /= RESHADE_DEPTH_INPUT_Y_SCALE;
-#if RESHADE_DEPTH_INPUT_X_PIXEL_OFFSET
-        texcoord.x -= RESHADE_DEPTH_INPUT_X_PIXEL_OFFSET * BUFFER_RCP_WIDTH;
-#else // Do not check RESHADE_DEPTH_INPUT_X_OFFSET, since it may be a decimal number, which the preprocessor cannot handle
-        texcoord.x -= RESHADE_DEPTH_INPUT_X_OFFSET / 2.000000001;
-#endif
-#if RESHADE_DEPTH_INPUT_Y_PIXEL_OFFSET
-        texcoord.y += RESHADE_DEPTH_INPUT_Y_PIXEL_OFFSET * BUFFER_RCP_HEIGHT;
-#else
-        texcoord.y += RESHADE_DEPTH_INPUT_Y_OFFSET / 2.000000001;
-#endif
-        float depth = tex2Dlod(depthSampler, float4(texcoord, 0, 0)).x * RESHADE_DEPTH_MULTIPLIER;
-
-#if RESHADE_DEPTH_INPUT_IS_LOGARITHMIC
-        const float C = 0.01;
-        depth = (exp(depth * log(C + 1.0)) - 1.0) / C;
-#endif
-#if RESHADE_DEPTH_INPUT_IS_REVERSED
-        depth = 1.0 - depth;
-#endif
-        const float N = 1.0;
-        depth /= RESHADE_DEPTH_LINEARIZATION_FAR_PLANE - depth * (RESHADE_DEPTH_LINEARIZATION_FAR_PLANE - N);
-
-        return depth;
-    }
+	float getDepth(float2 coords) {
+	
+		/*
+        float sourceDepth = tex2D(ReShade::DepthBuffer,coords).r;
+        
+    	if(bLightOmnidirectional && sourceDepth>fRayHitDepthThreshold && isOmniLight(coords)) {
+    		outDepth = saturate(float4(sourceDepth/2,0,0,1));
+   
+    		int2 delta = 0;
+    		float maxDist2 = 2;
+    		float minDiff = -1;
+    		for(delta.x = -1;delta.x<=1;delta.x++) {
+    			for(delta.y = -1;delta.y<=1;delta.y++) {
+    				float dist = dot(delta,delta);
+    				if(dist>maxDist2)continue;
+    				float2 deltaCoords = coords + delta*ReShade::PixelSize;
+    				if(!inScreen(deltaCoords)) continue;
+					if(!isOmniLight(deltaCoords)) {
+    					minDiff = minDiff==-1 ? dist : min(minDiff,dist);
+    				}
+	    		}
+    		}
+    		if(minDiff==-1) {
+    			outDepth = float4(sourceDepth*0.75,0,0,1);
+    		} else {
+    			outDepth = saturate(float4(sourceDepth*0.75-(minDiff+1)*fLightOmnidirectionalDepthThres/maxDist2,0,0,1));
+    			
+    		}
+    		
+		} else {
+        	outDepth = float4(sourceDepth,0,0,1);
+        }
+        */
+        
+        return ReShade::GetLinearizedDepth(coords);
+	}
     
     float2 InputPixelSize() {
-        float2 result = 1.0;
-        return result/float2(INPUT_WIDTH,INPUT_HEIGHT);
+    	float2 result = 1.0;
+    	return result/float2(INPUT_WIDTH,INPUT_HEIGHT);
     }
     
     float2 RenderPixelSize() {
-        float2 result = 1.0;
-        return result/float2(RENDER_WIDTH,RENDER_HEIGHT);
+    	float2 result = 1.0;
+    	return result/float2(RENDER_WIDTH,RENDER_HEIGHT);
     }
 
     bool inScreen(float2 coords) {
@@ -556,69 +541,36 @@ namespace DHRTGI2 {
     
     float3 getNormalJitter(float2 coords) {
     
-        int2 offset = int2((framecount*random*SQRT2),(framecount*random*PI))%NOISE_SIZE;
-        float3 jitter = normalize(tex2D(blueNoiseSampler,(offset+coords*BUFFER_SIZE)%(NOISE_SIZE)/(NOISE_SIZE)).rgb-0.5-float3(0.25,0,0));
-        return normalize(jitter);
+    	int2 offset = int2((framecount*random*SQRT2),(framecount*random*PI))%NOISE_SIZE;
+    	float3 jitter = normalize(tex2D(blueNoiseSampler,(offset+coords*BUFFER_SIZE)%(NOISE_SIZE)/(NOISE_SIZE)).rgb-0.5-float3(0.25,0,0));
+    	return normalize(jitter);
         
     }
     
     float3 getColorBounce(float2 coords) {
-        float3 result = getColor(coords).rgb;
-        if(fRayBounce>0) {
-            //result = saturate(result+getColorSampler(smoothPass3Sampler,coords).rgb*fRayBounce);
-            result = saturate(result+getColorSampler(resultSampler,coords).rgb*fRayBounce);
-        }
-        return result;
+    	float3 result = getColor(coords).rgb;
+		if(fRayBounce>0) {
+			//result = saturate(result+getColorSampler(smoothPass3Sampler,coords).rgb*fRayBounce);
+			result = saturate(result+getColorSampler(resultSampler,coords).rgb*fRayBounce);
+		}
+		return result;
     }
     
     float3 computeNormal(float2 coords,float3 offset) {
-        float3 posCenter = getWorldPosition(coords);
+    	float3 posCenter = getWorldPosition(coords);
         float3 posNorth  = getWorldPosition(coords - offset.zy);
         float3 posEast   = getWorldPosition(coords + offset.xz);
         return  normalize(cross(posCenter - posNorth, posCenter - posEast));
     }
     
     bool isOmniLight(float2 coords) {
-        float3 color = tex2Dlod(ReShade::BackBuffer,float4(coords.xy,0,0)).rgb;
-        float pureness = maxOf3(color)-minOf3(color);
-        
-        if(getBrightness(color)>=fLightOmnidirectionalThres && pureness>=fLightOmnidirectionalMinPureness) {
-            return true;
-        }
-        return false;
-    }
-    
-    void PS_DepthPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outDepth : SV_Target0) {
-        float sourceDepth = tex2D(ReShade::DepthBuffer,coords).r;
-        
-        if(bLightOmnidirectional && sourceDepth>fRayHitDepthThreshold && isOmniLight(coords)) {
-        outDepth = saturate(float4(sourceDepth/2,0,0,1));
-   
-            int2 delta = 0;
-            float maxDist2 = iLightOmnidirectionalRadius*iLightOmnidirectionalRadius*2;
-            float minDiff = -1;
-            for(delta.x = -iLightOmnidirectionalRadius;delta.x<=iLightOmnidirectionalRadius;delta.x++) {
-                for(delta.y = -iLightOmnidirectionalRadius;delta.y<=iLightOmnidirectionalRadius;delta.y++) {
-                    float dist = dot(delta,delta);
-                    if(dist>maxDist2)continue;
-                    float2 deltaCoords = coords + delta*ReShade::PixelSize;
-                    if(!inScreen(deltaCoords)) continue;
-                    if(!isOmniLight(deltaCoords)) {
-                        minDiff = minDiff==-1 ? dist : min(minDiff,dist);
-                    }
-                }
-            }
-            if(minDiff==-1) {
-                outDepth = float4(sourceDepth*0.75,0,0,1);
-            } else {
-                outDepth = saturate(float4(sourceDepth*0.75-(minDiff+1)*fLightOmnidirectionalDepthThres/maxDist2,0,0,1));
-                
-            }
-            
-        } else {
-            outDepth = float4(sourceDepth,0,0,1);
-        }
-        
+    	float3 color = tex2Dlod(ReShade::BackBuffer,float4(coords.xy,0,0)).rgb;
+		float pureness = maxOf3(color)-minOf3(color);
+		
+		if(getBrightness(color)>=fLightOmnidirectionalThres && pureness>=fLightOmnidirectionalMinPureness) {
+			return true;
+		}
+		return false;
     }
 
     void PS_NormalPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outNormal : SV_Target0) {
@@ -626,93 +578,112 @@ namespace DHRTGI2 {
         float3 offset = float3(ReShade::PixelSize, 0.0);
         
         float3 normal = computeNormal(coords,offset);
-        if(fNormalFilter>0.0) {
-            float depth = getDepth(coords);
-            
-            float3 normalTop = computeNormal(coords-offset.zy,offset);
-            float3 normalBottom = computeNormal(coords+offset.zy,offset);
-            if(diffT(normalBottom,normalTop,fNormalFilter)
-            //  && diffT(normal,normalBottom,fNormalFilter)
-            ) {
-                float depthTop = getDepth(coords-offset.zy);
-                float depthBottom = getDepth(coords+offset.zy);
-                
-                normal = abs(depth-depthTop)>abs(depth-depthBottom)?normalBottom:normalTop;
-            } else {
-                float3 normalLeft = computeNormal(coords-offset.xz,offset);
-                float3 normalRight = computeNormal(coords+offset.xz,offset);
-                if(diffT(normalLeft,normalLeft,fNormalFilter)
-                ) {
-                    float depthLeft = getDepth(coords-offset.xz);
-                    float depthRight = getDepth(coords+offset.xz);
-                    
-                    normal = abs(depth-depthLeft)>abs(depth-depthRight)?normalRight:normalLeft;
-                }
-            }
+        if(fNormalFilter>0.0 && fNormalFilter<0.5) {
+        	float depth = getDepth(coords);
+        	
+        	float3 normalTop = computeNormal(coords-offset.zy,offset);
+        	float3 normalBottom = computeNormal(coords+offset.zy,offset);
+        	if(diffT(normalBottom,normalTop,fNormalFilter)
+        	//	&& diffT(normal,normalBottom,fNormalFilter)
+			) {
+        		float depthTop = getDepth(coords-offset.zy);
+        		float depthBottom = getDepth(coords+offset.zy);
+        		
+        		normal = abs(depth-depthTop)>abs(depth-depthBottom)?normalBottom:normalTop;
+        	} else {
+	        	float3 normalLeft = computeNormal(coords-offset.xz,offset);
+	        	float3 normalRight = computeNormal(coords+offset.xz,offset);
+	        	if(diffT(normalLeft,normalLeft,fNormalFilter)
+				) {
+					float depthLeft = getDepth(coords-offset.xz);
+	        		float depthRight = getDepth(coords+offset.xz);
+	        		
+	        		normal = abs(depth-depthLeft)>abs(depth-depthRight)?normalRight:normalLeft;
+        		}
+        	}
         }
-        
-        float4 r = float4(normal/2.0+0.5,1.0);
-        outNormal = r;
+        if(fNormalFilter>0.5) {
+        	float depth = getDepth(coords);
+        	
+        	float3 normalTop = computeNormal(coords-offset.zy,offset);
+        	float3 normalBottom = computeNormal(coords+offset.zy,offset);
+        	float3 normalLeft = computeNormal(coords-offset.xz,offset);
+	        float3 normalRight = computeNormal(coords+offset.xz,offset);
+	        normal += normalTop+normalBottom+normalLeft+normalRight;
+	        normal/=5.0;
+        }
+       	
+        outNormal = float4(normal/2.0+0.5,1.0);
         
     }
     
     float3 getRayColor(float2 coords) {
-        float3 color = getColorBounce(coords);
-            
-        if(fSaturateColor>0) {
-            float3 hsl = RGBtoHSL(color);
-            if(hsl.y>0.1 && hsl.z>0.1) {
-                float maxChannel = getBrightness(color.rgb);
-                if(maxChannel>0) {
-                    float3 saturatedColor = pow(color.rgb/maxChannel,fSaturateColorPower);
-                    color.rgb = fSaturateColor*saturatedColor+(1.0-fSaturateColor)*color.rgb;
-                }
-            }
-        }
-        return color;
+    	float3 color = getColorBounce(coords);
+			
+		if(fSaturateColor>0) {
+			float3 hsl = RGBtoHSL(color);
+			if(hsl.y>0.1 && hsl.z>0.1) {
+				float maxChannel = getBrightness(color.rgb);
+				if(maxChannel>0) {
+					float3 saturatedColor = pow(color.rgb/maxChannel,fSaturateColorPower);
+					color.rgb = fSaturateColor*saturatedColor+(1.0-fSaturateColor)*color.rgb;
+				}
+			}
+		}
+		return color;
     }
 
     float4 trace(float3 refWp,float3 lightVector,float startDepth) {
 
-        float3 startNormal = getNormal(getScreenPosition(refWp));
+		float3 startNormal = getNormal(getScreenPosition(refWp));
                 
-        float stepRatio = 1.0+fRayStepMultiply/10.0;
-        
+		float stepRatio = 1.0+fRayStepMultiply/10.0;
+		
         float stepLength = 1.0/fRayStepPrecision;
         float3 incrementVector = lightVector*stepLength;
         float traceDistance = 0;
         float3 currentWp = refWp;
         
         float rayHitIncrement = 50.0*startDepth*fRayHitDepthThreshold/50.0;
-        float rayHitDepthThreshold = rayHitIncrement;
+		float rayHitDepthThreshold = rayHitIncrement;
 
         bool crossed = false;
         float deltaZ = 0;
         float deltaZbefore = 0;
         float3 lastCross;
         
-        bool outSource = false;
+        bool skyed = false;
+        float3 lastSky;
+		
+		bool outSource = false;
         bool firstStep = true;
         
         bool startWeapon = startDepth<fWeaponDepth;
         float weaponLimit = fWeaponDepth*BUFFER_SIZE3.z;
-        
-        
+		
+		
         do {
-            currentWp += incrementVector;
+        	currentWp += incrementVector;
             traceDistance += stepLength;
             
             float3 screenCoords = getScreenPosition(currentWp);
-            
-            bool outScreen = !inScreen(screenCoords) && (!startWeapon || currentWp.z<weaponLimit);
+			
+			bool outScreen = !inScreen(screenCoords) && (!startWeapon || currentWp.z<weaponLimit);
             
             float3 screenWp = getWorldPosition(screenCoords.xy);
             
             deltaZ = screenWp.z-currentWp.z;
             
+            float depth = getDepth(screenCoords.xy);
+            bool isSky = depth>fSkyDepth;
+            if(isSky) {
+            	skyed = true;
+            	lastSky = currentWp;
+            }
+            
             
             if(firstStep && deltaZ<0) {
-                // wrong direction
+				// wrong direction
                 currentWp = refWp-incrementVector;
                 incrementVector = reflect(incrementVector,startNormal);
                 
@@ -722,68 +693,77 @@ namespace DHRTGI2 {
                 firstStep = false; 
             } else if(outSource) {
            
-                if(bLightOmnidirectional) {
-                    // TODO
-                    if(isOmniLight(screenCoords.xy)) {
-                    //  return float4(currentWp,1.0);
-                    }
-                } 
-                
-                
-                if(!outScreen && sign(deltaZ)!=sign(deltaZbefore)) {
-                    // search more precise
-                    float preciseRatio = 1.0/iRayPreciseHitSteps;
-                    float3 preciseIncrementVector = incrementVector;
-                    float preciseLength = stepLength;
-                    for(int precisePass=0;precisePass<iRayPreciseHit;precisePass++) {
-                        preciseIncrementVector *= preciseRatio;
-                        preciseLength *= preciseRatio;
-                        
-                        int preciseStep=0;
-                        bool recrossed=false;
-                        while(!recrossed && preciseStep<iRayPreciseHitSteps-1) {
-                            currentWp -= preciseIncrementVector;
-                            traceDistance -= preciseLength;
-                            deltaZ = screenWp.z-currentWp.z;
-                            recrossed = sign(deltaZ)==sign(deltaZbefore);
+				if(bLightOmnidirectional) {
+            		// TODO
+            		if(isOmniLight(screenCoords.xy)) {
+            			return float4(currentWp,0.5);
+            		}
+				} 
+				
+            	
+            	if(!outScreen && sign(deltaZ)!=sign(deltaZbefore)) {
+            		// search more precise
+            		float preciseRatio = 1.0/iRayPreciseHitSteps;
+            		float3 preciseIncrementVector = incrementVector;
+            		float preciseLength = stepLength;
+            		for(int precisePass=0;precisePass<iRayPreciseHit;precisePass++) {
+            			preciseIncrementVector *= preciseRatio;
+						preciseLength *= preciseRatio;
+						
+						int preciseStep=0;
+            			bool recrossed=false;
+            			while(!recrossed && preciseStep<iRayPreciseHitSteps-1) {
+            				currentWp -= preciseIncrementVector;
+            				traceDistance -= preciseLength;
+            				deltaZ = screenWp.z-currentWp.z;
+            				recrossed = sign(deltaZ)==sign(deltaZbefore);
                             preciseStep++;
-                        }
-                        if(recrossed) {
-                            currentWp += preciseIncrementVector;
-                            traceDistance += preciseLength;
-                            deltaZ = screenWp.z-currentWp.z;
-                        }
-                    }
-                    
-                    lastCross = currentWp;
-                    crossed = true;
-                    
-                    
-                }
-                if(outScreen) {
-                    if(crossed) {
-                        return float4(lastCross,1.0);
-                    }
-                    return float4(currentWp, 0.005);
-                } 
-                if(abs(deltaZ)<=rayHitDepthThreshold) {
-                    // hit !
-                    return float4(crossed ? lastCross : currentWp, 1.0);
-                }
+            			}
+            			if(recrossed) {
+            				currentWp += preciseIncrementVector;
+            				traceDistance += preciseLength;
+            				deltaZ = screenWp.z-currentWp.z;
+            			}
+            		}
+            		
+            		lastCross = currentWp;
+            		crossed = true;
+            		
+            		
+            	}
+            	if(outScreen) {
+            		if(crossed) {
+            			return float4(lastCross,0.5);
+            		}
+            		if(skyed) {
+            			return float4(lastSky,fSkyColor);
+            		}
+            		return float4(currentWp, 0.01); // TODO HERE
+            	} 
+				if(abs(deltaZ)<=rayHitDepthThreshold) {
+            		// hit !
+            		return float4(crossed ? lastCross : currentWp, 1.0);
+            	}
             } else {
-                if(outScreen) {
-                    currentWp -= incrementVector;
-                    //screenCoords = getScreenPosition(currentWp);
-                            
-                    //if(screenCoords.z>fSkyDepth) {
-                    //  return float4(currentWp,1.0);
-                    return float4(currentWp,0.005);
-                }
-                outSource = deltaZ>rayHitDepthThreshold;
-                if(!outSource) {
-                    float3 normal = getNormal(screenCoords);
-                //  outSource = diffT(normal,startNormal,0.1);
-                }
+            	if(outScreen) {
+            		if(crossed) {
+            			return float4(lastCross,0.5);
+            		}
+            		if(skyed) {
+            			return float4(lastSky,fSkyColor);
+            		}
+            		currentWp -= incrementVector;
+            		//screenCoords = getScreenPosition(currentWp);
+            				
+            		//if(screenCoords.z>fSkyDepth) {
+            		//	return float4(currentWp,1.0);
+            		return float4(currentWp,0.01);
+				}
+				outSource = deltaZ>rayHitDepthThreshold;
+            	if(!outSource) {
+            		float3 normal = getNormal(screenCoords);
+            	//	outSource = diffT(normal,startNormal,0.1);
+            	}
             }
 
             firstStep = false;
@@ -802,105 +782,212 @@ namespace DHRTGI2 {
 
     void PS_LightPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outColor : SV_Target0, out float4 outHit : SV_Target1, out float4 outDistance : SV_Target2) {
         
-        if(fSubpixelJitter>0.0) {
-            float2 jitter = float2(random%16,(random+8)%16)/16.0;
-            coords += ReShade::PixelSize*fSubpixelJitter*(-0.5+jitter);
-        }
-        //float depth = getDepth(coords);
         float depth = ReShade::GetLinearizedDepth(coords);
         if(depth>fSkyDepth) {
-            outDistance = float4(1,0,0,1);
-            return;
+			outDistance = float4(1,0,0,1);
+			return;
+		}
+		
+		if(fSubpixelJitter>0.0) {
+        	float2 jitter = float2(random%16,(random+8)%16)/16.0;
+        	float2 jitterCoords = coords + ReShade::PixelSize*fSubpixelJitter*(-0.5+jitter);
+        	float jitterDepth = ReShade::GetLinearizedDepth(jitterCoords);
+        	if(abs(depth-jitterDepth)<fSmoothDepthThreshold) {
+        		coords = jitterCoords;
+        		depth = jitterDepth;        		
+        	}
         }
-        
+		
         float3 targetWp = getWorldPosition(coords);
         float3 targetNormal = getNormalJitter(coords);
         //float3 targetNormal = getNormalJitter2(coords,targetWp);
 
         float3 lightVector = reflect(targetWp,targetNormal);
         
-        float opacity = 1.0/getFrameAccu();
-            
+        float opacity = 1.0;
+        float aoOpacity = 1.0;
+	        
         
        // float4 hitColor = trace(targetWp,lightVector);
         float4 hitPosition = trace(targetWp,lightVector,depth);
-        
-        
         float3 screenCoords = getScreenPosition(hitPosition.xyz);
-        float3 color = getRayColor(screenCoords.xy);
         
-        if(hitPosition.a==0) {
-            // no hit
-            outColor = float4(color,opacity);
-          outHit = float4(screenCoords,1);  
-            //outDistance = outDistance = float4(0,0,0,opacity);
-        } else {
-            float b = getBrightness(color);
-            
-            float d = abs(distance(hitPosition.xyz,targetWp));
-                        
-            float distance = 1.0+0.02*d;
-            //float distanceRatio = 0.1+1.0/pow(distance,0.05*fFadePower);//(1-pow(distance,fFadePower)/pow(iRayDistance,fFadePower));
-            float distanceRatio = 0.0+1.0/pow(distance,fFadePower);//(1-pow(distance,fFadePower)/pow(iRayDistance,fFadePower));
-            
-            float previousDepth = getPeviousDepth(coords).r;
-            if(abs(previousDepth-depth)>fPeviousDepth) {
-                opacity *= 5.0;
-            }
-            if(bLightOmnidirectional && isOmniLight(screenCoords.xy)) {
-                if(fLightOmnidirectionalSaturate>0) {
-                    float3 hsl = RGBtoHSL(color);
-                    hsl.y = 1.0;
-                    hsl.z = 0.5;
-                    float3 saturated = HSLtoRGB(hsl);
-                    color = fLightOmnidirectionalSaturate*saturated+color*(1.0-fLightOmnidirectionalSaturate);
-                }
-                
-                
-                opacity *= 5.0*fLightOmnidirectionalDepthThres;
-            } 
-            if(fBrightnessOpacity>0) {
-                opacity *= (1.0-fBrightnessOpacity)+fBrightnessOpacity*b;//1.0-sqrt(1.0-b);
-                //opacity *= abs(b-0.5)*2.0;//1.0-sqrt(1.0-b);
-            }
-            //float opacity = bFrameBlur ? 1.0/iFrameAccu : 1;
-            //outColor = float4(hitPosition.a*(0.5+b)*distanceRatio*color.rgb,1.0);
-            outColor = float4(hitPosition.a*distanceRatio*color,opacity);
-          outHit = float4(screenCoords,1);  
-          if(screenCoords.z>=0.9) {
-            outDistance = float4(iAODistance>0?0:1,0,0,opacity/getFrameAccu());
-          } else {
-            bool outStreen = hitPosition.w==0;
-            //float ao = d>iAODistance ? 1 : (d<=1?0:(d/iAODistance));
-            //outDistance =  depth<fWeaponDepth ? float4(1,0,0,opacity/getFrameAccu()) : float4(ao,0,0,opacity/getFrameAccu());
-            outDistance = float4(outStreen||d>10.0*depth*iAODistance ? 1.0 : d/(10.0*depth*iAODistance), 0,0,0.2/getFrameAccu());
-          }
-            
-        }
-    }
-    
-    void PS_SmoothPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outColor : SV_Target0, out float4 outAO : SV_Target1) {
-        float refDepth = getDepth(coords);
-        if(refDepth>fSkyDepth) return;
-        
-        if(iSmoothRadius==0) {
-            outColor = getColorSamplerLod(lightPassSampler,coords,iSmoothLod);
-            float ao = getColorSampler(lightPassAOSampler,coords).r;
-            outAO = float4(ao,ao,ao,1.0);
+        if(hitPosition.a<=0.1) {
+        	// no hit
+        	outColor = 0.0;
+	  	  outHit = float4(screenCoords,0.0);	
+            outDistance = float4(1,0,0,0.5);
             return;
         }
         
-        int2 coordsInt = coords*RENDER_SIZE;
         
+        float3 color = getRayColor(screenCoords.xy);
+        
+    	float b = getBrightness(color);
+    	
+    	float d = abs(distance(hitPosition.xyz,targetWp));
+                    
+    	float distance = 1.0+0.02*d;
+    	//float distanceRatio = 0.1+1.0/pow(distance,0.05*fFadePower);//(1-pow(distance,fFadePower)/pow(iRayDistance,fFadePower));
+        float distanceRatio = 0.0+1.0/pow(distance,fFadePower);//(1-pow(distance,fFadePower)/pow(iRayDistance,fFadePower));
+        
+        float previousDepth = getPeviousDepth(coords).r;
+  
+        if(bLightOmnidirectional && isOmniLight(screenCoords.xy)) {
+        	d = iAODistance;
+	        if(fLightOmnidirectionalSaturate>0) {
+        		float3 hsl = RGBtoHSL(color);
+        		hsl.y = 1.0;
+	        	hsl.z = 0.5;
+	        	float3 saturated = HSLtoRGB(hsl);
+	        	color = saturate(fLightOmnidirectionalSaturate*saturated+color*(1.0-fLightOmnidirectionalSaturate)*fLightOmnidirectionalIntensity);
+        	}
+		} 
+		if(fBrightnessOpacity>0) {
+        	opacity *= (1.0-fBrightnessOpacity)+fBrightnessOpacity*b;
+        }
+
+		//outColor = saturate(float4(distanceRatio*color,hitPosition.a*opacity));
+  	    outHit = float4(screenCoords,hitPosition.a<1.0 ? 1 : 0);	
+  	    outColor = saturate(float4(color,distanceRatio*hitPosition.a*hitPosition.a));
+  	    if(hitPosition.a>=1.0) {
+  	      
+	  	  if(screenCoords.z>=0.9) {
+	  	  	outDistance = float4(iAODistance>0?0:1,0,0,aoOpacity);
+	  	  } else {
+	  	  	if(d>iAODistance) {
+	  	  		outDistance = float4(1,0,0,0.5*aoOpacity);
+	  	  	} else {
+	  	  		outDistance = float4(d/iAODistance,0,0,aoOpacity*(1.0-d/iAODistance));
+	  	  	}
+	  	  	
+	  	  }
+  	    } else {
+  	    	//outColor = float4(0,0,0,0.5);
+  	  	  if(d>iAODistance) {
+	  	  		outDistance = float4(1,0,0,0.5*aoOpacity);
+	  	  	} else {
+	  	  		outDistance = float4(d/iAODistance,0,0,0.5*aoOpacity);
+	  	  	}
+  	    }
+    }
+
+
+	void addIfMatchDepth(in out float4 result,sampler sourceSampler,sampler previousLowerSampler, float2 coords, float refDepth) {
+		float depth = getDepth(coords);
+		if(abs(depth-refDepth)<=0.1) {
+			float4 color = getColorSampler(sourceSampler,coords);
+			if(color.a<0.1) {
+				float4 previous = getColorSampler(previousLowerSampler,coords);
+				float previousB = getBrightness(previous.rgb);
+				color += previous*previousB;
+				color /= 1.0+previousB;
+			}
+			color.rgb *= color.a;
+			result += color;
+		}
+	}
+	
+    void PS_FillGapPass(sampler sourceSampler,sampler previousLowerSampler,float2 pixelSize, float2 coords : TexCoord, out float4 outColor : SV_Target0,float opacity) {
+    	float refDepth = getDepth(coords);
+        float3 pixelSizeZ = float3(pixelSize,0);
+        
+        float4 result = 0;
+        float bWeight = 0;
+        addIfMatchDepth(result,sourceSampler,previousLowerSampler,coords,refDepth);
+        addIfMatchDepth(result,sourceSampler,previousLowerSampler,coords+pixelSizeZ.xz,refDepth);
+        addIfMatchDepth(result,sourceSampler,previousLowerSampler,coords+pixelSizeZ.zy,refDepth);
+        addIfMatchDepth(result,sourceSampler,previousLowerSampler,coords+pixelSizeZ.xy,refDepth);
+
+		float confidence = result.a;
+		
+        if(confidence==0) {
+            result = 0;
+        } else {
+            result.rgb /= result.a;
+            //result.a = saturate(confidence/4.0);
+        }
+        
+        result.a *= opacity;
+
+        outColor = saturate(result);
+    }
+    
+    void PS_FillGapPass1(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outColor : SV_Target0) {
+    	PS_FillGapPass(lightPassSampler,fillGapPass1Sampler,RenderPixelSize(),coords,outColor,1.0);
+    }
+    
+    void PS_FillGapPass2(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outColor : SV_Target0) {
+    	PS_FillGapPass(fillGapPass1Sampler,fillGapPass2Sampler,RenderPixelSize()*2.0,coords,outColor, 1.0);
+    }
+    
+    void PS_FillGapPass3(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outColor : SV_Target0) {
+    	PS_FillGapPass(fillGapPass2Sampler,smoothPassSampler,RenderPixelSize()*4.0,coords,outColor, 1.0/getFrameAccu());
+    }
+    
+    float4 getColorWithFallback(float2 coords) {
+    	float4 color = getColorSampler(lightPassSampler,coords);
+    	
+    	float4 colorFB1 = getColorSampler(fillGapPass1Sampler,coords);
+    	float4 colorFB2 = getColorSampler(fillGapPass2Sampler,coords);
+    	float4 colorFB3 = getColorSampler(fillGapPass3Sampler,coords);
+    	float4 defaultColor = float4(0,0,0,1);
+    	
+    	bool bReconDebug = true;
+    	if(false) {
+    		color.rgb = float3(1,1,1);
+    		colorFB1.rgb = color.rgb*0.75;
+    		colorFB2.rgb = color.rgb*0.5;
+    		colorFB3.rgb = color.rgb*0.25;
+	    	defaultColor = float4(0,0,0,1);
+		}
+		
+		
+		
+		if(color.a>0.1) {
+			return color;
+		}
+		if(colorFB1.a>0.1) {
+			return colorFB1;
+		}
+		if(colorFB2.a>0.1) {
+			return colorFB2;
+		}
+		if(colorFB3.a>0.1) {
+			return colorFB3;
+		}
+		return defaultColor;
+		
+    }
+
+    void PS_SmoothPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outColor : SV_Target0, out float4 outAO : SV_Target1) {
+    	float refDepth = getDepth(coords);
+		if(refDepth>fSkyDepth) {
+    		outColor = 1.0;
+    		outAO = 1.0;
+    		return;
+    	}
+		
+		float opacity = 1.0/getFrameAccu();
+		
+		if(iSmoothRadius==0) {
+    		outColor = float4(getColorWithFallback(coords).rgb,opacity);
+    		float ao = getColorSampler(lightPassAOSampler,coords).r;
+    		outAO = float4(ao,ao,ao,opacity);
+    		return;
+    	}
+    	
+    	int2 coordsInt = coords*RENDER_SIZE;
+    	
         float3 refNormal = getNormal(coords);
         
         float3 result = 0;
         float weightSum = 0;
         
         int foundSamples = 0;
-
-        float AO = 0.0;
-        int AOSamples = 0;
+		
+        float ao = 0;
+        float aoWeightSum = 0;
         
         float2 pixelSize = RenderPixelSize();
         
@@ -910,46 +997,57 @@ namespace DHRTGI2 {
         
         
         for(currentCoords.x=minCoords.x;currentCoords.x<=maxCoords.x;currentCoords.x+=pixelSize.x) {
-            
-            for(currentCoords.y=minCoords.y;currentCoords.y<=maxCoords.y;currentCoords.y+=pixelSize.y) {
-                int2 currentCoordsInt = currentCoords*RENDER_SIZE;
-            
-                
+        	for(currentCoords.y=minCoords.y;currentCoords.y<=maxCoords.y;currentCoords.y+=pixelSize.y) {
+        		int2 currentCoordsInt = currentCoords*RENDER_SIZE;
+        		float dist2 = distance(coordsInt,currentCoordsInt);
+        		
+        		if(dist2>iSmoothRadius) continue;
+        	
+	        	
                 float depth = getDepth(currentCoords);
                 if(depth>fSkyDepth) continue;
                 
                 if(abs(depth-refDepth)<=fSmoothDepthThreshold) {
-                    
+                	
                     float3 normal = getNormal(currentCoords);
                     if(diffT(normal,refNormal,fSmoothNormalThreshold)) {
+                    	
+	                    
+						//float3 hitPos = tex2Dfetch(lightPassHitSampler,currentCoordsInt).xyz;
+						
+                		float4 color = getColorWithFallback(currentCoords);
+               		
+                    	float aoWeight = color.a;
+                        float weight = color.a;
                         
-                        float dist = distance(coordsInt,currentCoordsInt);
-                        if(dist<=iSmoothRadius) {
-                            float4 aoColor = tex2Dfetch(lightPassAOSampler,currentCoordsInt);
-                            AO += pow(aoColor.r,fAOMultiplier);
-                            AOSamples += 1;
-                        }
+                        float distWeight = iSmoothRadius/(dist2+1);
+                        weight *= distWeight;
+                        aoWeight *= distWeight;
+                    	if(bPurenessWeight) {
+                    		float pureness = maxOf3(color.rgb)-minOf3(color.rgb);
+                    		weight += pureness*10;
+                    	}
+                    	if(bBrightnessWeight) {
+                    		float brightness = getBrightness(color.rgb);
+                    		weight *= brightness*10;
+                    	}
+                    	if(bNormalWeight) {
+                    		float nw = abs(dot(normal,refNormal));
+                    		weight *= nw;
+                    		aoWeight *= nw;
+                    	}
+                    	if(bDepthWeight) {
+                    		float dw = 1.0-abs(depth-refDepth)/fSmoothDepthThreshold;
+                    		weight *= dw*dw;
+                    		aoWeight *= dw*dw;
+                    	}
                         
-                        
-                        //float3 hitPos = tex2Dfetch(lightPassHitSampler,currentCoordsInt).xyz;
-                        
-                        float3 color = tex2Dfetch(lightPassSampler,currentCoordsInt).rgb;
-                    
-                        float weight = 0.5;
-                        if(bPurenessWeight) {
-                            float pureness = maxOf3(color)-minOf3(color);
-                            weight += pureness*10;
-                        }
-                        if(bBrightnessWeight) {
-                            float brightness = getBrightness(color);
-                            weight *= brightness*10;
-                        }
-                        if(bNormalWeight) {
-                            weight *= abs(dot(normal,refNormal));
-                        }
-                        
-                        // hit
-                        result += color*weight;
+						// hit
+						float4 aoColor = getColorSampler(lightPassAOSampler,currentCoords);
+						ao += aoColor.r*aoWeight;
+						aoWeightSum += aoWeight;
+						
+                    	result += color.rgb*weight;
                         weightSum += weight;
                         foundSamples++;
 
@@ -958,260 +1056,96 @@ namespace DHRTGI2 {
             } // end for y
         } // end for x
 
-        float3 resultAO = AO/AOSamples;
-        outAO = float4(resultAO,1.0/getFrameAccu());
+		float resultAO = ao/aoWeightSum;
+        //outAO = float4(resultAO,resultAO,resultAO,resultAO<1.0 ? 1.0-resultAO : 1.0);
         
         
         if(foundSamples<1) {
-            // not enough
-            outColor = float4(getColorSamplerLod(lightPassSampler,coords,iSmoothLod).rgb,1);
-            outAO = 1.0;
-            outAO.a = 1.0/getFrameAccu();
-            return;
+        	// not enough
+        	result = getColorSampler(lightPassSampler,coords).rgb;
+        	resultAO = 1.0;
+    		return;
         } 
         
         //result = float(foundSamples)/10;//saturate(fLightMult*result/weightSum);
-        //result = saturate(fLightMult*result/weightSum);
-        result /= weightSum;
-        outColor = float4(result,1.0);
+		//result = saturate(fLightMult*result/weightSum);
+		result /= weightSum;
+        outColor = float4(result,opacity);
+        outAO = float4(resultAO,resultAO,resultAO,opacity);
     }
-    
-    
-    void PS_SmoothPassNoScale(int passNumber,sampler colorSampler,sampler aoSampler, float2 coords : TexCoord, out float4 outColor : SV_Target0, out float4 outAO : SV_Target1) {
-        
-        float refDepth = getDepth(coords);
-        if(refDepth>fSkyDepth) {
-            outColor = float4(0,0,0,1);
-            outAO = getColorSamplerLod(aoSampler,coords,iSmoothLod);
-            return;
+	
+	float3 minSum3(float3 a,float b) {
+		float s = a.x+a.y+a.z;
+		return s>0 && s>b ? b*a/s : a;
+	}
+	
+	void PS_AccuPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outColor : SV_Target0) {
+		float previousDepth = getPeviousDepth(coords).r;
+		float depth = ReShade::GetLinearizedDepth(coords);
+		
+		float opacity = 1.0/getFrameAccu();
+		
+		float3 color = tex2D(smoothPassSampler,coords).rgb;
+		
+		float brightness = getBrightness(color);
+		if(fBrightnessOpacity>0) {
+        	opacity *= (1.0-fBrightnessOpacity)+fBrightnessOpacity*brightness;
         }
-        
-        if(iSmoothRadius==0) {
-            outColor = getColorSamplerLod(colorSampler,coords,iSmoothLod);
-            float ao = getColorSamplerLod(aoSampler,coords,iSmoothLod).r;
-            outAO = float4(ao,ao,ao,1);
-            return;
+		
+        if(abs(previousDepth-depth)>fPeviousDepth) {
+        	opacity = 1.0;
         }
-
-        int2 coordsInt = coords*BUFFER_SIZE;
-        
-        float3 refNormal = getNormal(coords);
-
-        float3 result = 0;
-        float weightSum = 0;
-        
-        int foundSamples = 0;
-
-        float AO = 0.0;
-        int AOSamples = 0;
-
-        float radius = passNumber*iSmoothRadius;
-        
-        float2 pixelSize = InputPixelSize();
-        float2 stepSize = pixelSize*passNumber;
-        
-        float2 minCoords = saturate(coords-radius*pixelSize);
-        float2 maxCoords = saturate(coords+radius*pixelSize);
-        float2 currentCoords = minCoords;
-
-        for(currentCoords.x=minCoords.x;currentCoords.x<=maxCoords.x;currentCoords.x+=stepSize.x) {
-            
-            for(currentCoords.y=minCoords.y;currentCoords.y<=maxCoords.y;currentCoords.y+=stepSize.y) {
-
-                int2 currentCoordsInt = currentCoords*BUFFER_SIZE;
-                
-                float depth = getDepth(currentCoords);
-                if(depth>fSkyDepth) continue;
-
-                if(abs(depth-refDepth)<=fSmoothDepthThreshold) {
-                    float3 normal = getNormal(currentCoords);
-                    if(diffT(normal,refNormal,fSmoothNormalThreshold)) {
-                        
-                        float dist = distance(coordsInt,currentCoordsInt);
-                        if(dist<=radius) {
-                            float4 aoColor = getColorSamplerLod(aoSampler,currentCoords,iSmoothLod);
-                            AO += aoColor.r;
-                            AOSamples += 1;
-                        }
-                
-                        float3 color = getColorSamplerLod(colorSampler,currentCoords,iSmoothLod).rgb;
-                     
-                        float weight=1;
-                        if(bPurenessWeight) {
-                            float pureness = maxOf3(color)-minOf3(color);
-                            weight += pureness*10;
-                        }
-                        if(bBrightnessWeight) {
-                            float brightness = getBrightness(color);
-                            weight *= brightness*10;
-                        }
-                        if(bNormalWeight) {
-                            weight *= abs(dot(normal,refNormal));
-                        }
-                    
-                        // hit
-                        result += color*weight;
-                        weightSum += weight;
-                        foundSamples++;
-                        
-                    } // end normal
-                } // end depth
-            } // end for y
-        } // end for x
-        
-        float3 resultAO = AO/AOSamples;
-        outAO = float4(resultAO,1.0/getFrameAccu());
-
-        if(foundSamples<1) {
-            // not enough
-            outColor = float4(getColorSamplerLod(colorSampler,coords,iSmoothLod).rgb,1);
-            outAO = getColorSamplerLod(aoSampler,coords,iSmoothLod);
-            outAO.a = 1.0/getFrameAccu();
-            return;
-        }
-
-        result = saturate(result/weightSum);        
-        outColor = float4(result,1.0/getFrameAccu());
-    }
-    
-    void PS_SmoothPass2(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outColor : SV_Target0, out float4 outAO : SV_Target1) {
-        PS_SmoothPassNoScale(fSmoothPass,smoothPassSampler,smoothAOPassSampler,coords,outColor,outAO);
-    }
-    
-    void PS_SmoothPass3(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outColor : SV_Target0, out float4 outAO : SV_Target1) {
-        PS_SmoothPassNoScale(fSmoothPass*2,smoothPass2Sampler,smoothAOPass2Sampler,coords,outColor,outAO);
-    }
-    
-
-    
-    float3 minSum3(float3 a,float b) {
-        float s = a.x+a.y+a.z;
-        return s>0 && s>b ? b*a/s : a;
-    }
+		outColor = float4(color,opacity);
+	}
+	
     
     void PS_UpdateResult(in float4 position : SV_Position, in float2 coords : TEXCOORD, out float4 outPixel : SV_Target,out float4 outDepth : SV_Target1)
     {
         float3 color = getColor(coords).rgb;
         float depth = getDepth(coords);
         if(depth>fSkyDepth) {
-            outPixel = float4(color,1.0);
-            return;
-        }
+        	outPixel = float4(color,1.0);
+        	return;
+		}
+		
         
-        
-        float3 colorHsl = RGBtoHSL(color);
-        float3 light = getColorSampler(smoothPass3Sampler,coords).rgb;
+		float3 colorHsl = RGBtoHSL(color);
+        float3 light = getColorSampler(lightAccuSampler,coords).rgb;
         float3 lightHsl = RGBtoHSL(light);
         
         float b = getBrightness(color);
         float lb = getBrightness(light);
         
-        float ao = max(getColorSampler(smoothAOPass3Sampler,coords).r,b);
+        float ao = max(getColorSampler(smoothAOPassSampler,coords).r,b);
         
-        if(iMergingMethod==0) {
-            //ao = saturate(max(lb*2,ao));
-            
-            
-            //float3 result = fSourceColor*color+fLightMult*(b<=0.5 ? b : 1-b)*light;
-            //float3 result = color*b+(1-b)*fSourceColor*color+fLightMult*(pow(0.5-abs(b-0.5),0.5))*light*saturate(0.1+color);
-           //float3 result = color*b+(1-b)*fSourceColor*color+fLightMult*light*(fLightOffset+color);
-    
-            float3 colorDesatHsl = colorHsl;
-            colorDesatHsl.y *= fSourceDesat;
-            if(colorDesatHsl.z>0) {
-                colorDesatHsl.z = pow(colorDesatHsl.z+fLightOffset,0.5);
-            }
-            colorDesatHsl = saturate(colorDesatHsl);
-            float3 colorDesat = HSLtoRGB(colorDesatHsl);
-            float3 lightApply = light*colorDesat;
-            
-            float3 colorHueShift = colorHsl;
-            colorHueShift.x = lightHsl.x;
-            colorHueShift.y = lightHsl.y;
-            colorHueShift.z = pow(colorHueShift.z+0.1,0.5)*abs(sin(lightHsl.z*PI));
-            lightApply = HSLtoRGB(colorHueShift);
-    
-           float colorRatio = fSourceColor;
-           float lightRatio = (1.0-b)+lightHsl.y+lightHsl.z;//+(1-hDistance);
-           //float3 result = (colorRatio*color+lightRatio*lightApply)/fLightNormalize;
-           //result = (result-fLightOffset)/(1.0-fLightOffset);
-           
-           //result = (color*colorRatio+lightApply*(lb+fLightOffset)*lightRatio-fLightNormalize)*ao;
-           
-           //result *= saturate(ao+fAOMultiplier);
-           
-           //result = lightApply;
-    
-           float mLight = min(b*2+0.1,fLightMult*fMaxLight);
-           float3 result = (1.0-b)*2*(colorHueShift.y)*lightApply+(1.0-colorHueShift.y)*max3(color,fLightOffset);
-           result = (color*colorRatio+minSum3(fLightMult*light,mLight)*result*lightRatio)/(0.9+fLightNormalize);
-           result *= ao;
-           
-           
-           //float3 result = ((color)+lightApply*fLightNormalize)/(1+fLightNormalize);
-           outPixel = float4(saturate(result),1.0);
-       
-       } else if(iMergingMethod==1) {
-        float3 lightMerge = lightHsl;
-        if(lightHsl.y<=0.0) lightMerge.x = colorHsl.x;
-        lightMerge.y = lightHsl.y;
-        lightMerge.z *= colorHsl.z==0 ? 0 : colorHsl.z+fLightOffset;
-        lightMerge = HSLtoRGB(lightMerge);
-        
-        float3 colorMerge = colorHsl;
-        colorMerge = HSLtoRGB(colorMerge);
-        
-        float3 result = (lightMerge*fLightMult+colorMerge*fSourceColor)/(0.9+fLightNormalize);
-        
-        outPixel = float4(saturate(result),1.0);
-       } else if(iMergingMethod==2) {
-        float3 lightMerge = lightHsl;
-        if(lightHsl.y<=0.0) lightMerge.x = colorHsl.x;
-        lightMerge.y = lightHsl.y;
-        lightMerge.z *= colorHsl.z*(1.0+fLightOffset);
-        lightMerge = HSLtoRGB(lightMerge);
-        
-        float pureness = bPurenessMerge ? 2*maxOf3(lightMerge)-minOf3(lightMerge)
-                :0;
-           float3 colorMerge = colorHsl;
-           
-        colorMerge = HSLtoRGB(colorMerge);
-        
-        //float3 result = max3(lightMerge*fLightMult,colorMerge*fSourceColor);
-        float mLight = min(b*2+0.1,fLightMult*fMaxLight);
-           float3 result = ((1.0+lightMerge.y)*minSum3(lb*lightMerge*fLightMult,mLight)*(fLightOffset+1.0-max(colorHsl.z,colorHsl.y))+b*color*fSourceColor)/(b+lb);
-           result *= ao;
-           float rb = getBrightness(result);
-           result = result*(1.0+rb-b+pureness)+(1.0-rb-pureness+b)*color;
-            
-        outPixel = float4(saturate(result/(0.1+fLightNormalize)),1.0);
-        
-       } else if(iMergingMethod==3) {
-        
-        float3 absLigh = light*b;
-        float3 darknessLight = light*(1-b)*fLightOffset;
-        ao = saturate(ao+lb);
-        
-        float3 result = ao*(color*fSourceColor+fLightMult*absLigh+darknessLight)/(0.1+fLightNormalize);
-        float3 resultHsl = RGBtoHSL(result);
-        if(resultHsl.x<=0.1 && resultHsl.y<=0.1) {
-            resultHsl.x = colorHsl.x;
-               resultHsl.y = colorHsl.y;
-        }
-        result = HSLtoRGB(resultHsl);
-        result = b*color+(1.0-b)*result;
-        outPixel = float4(saturate(result),1.0);
-       } else if(iMergingMethod==4) {
-        
-        float3 colorHslLight = colorHsl;
-        colorHslLight.y = lightHsl.y;
-        float3 colorLight = HSLtoRGB(colorHslLight);
-        float3 darknessLight = light*(1-b)*fLightOffset;
-        ao = saturate(ao+lb);
-        
-        //float3 result = ao*max(b*fSourceColor*color,(1.0-b)*fLightMult*absLigh+darknessLight);
-        outPixel = float4(b*saturate(color+max(-color+light,0)),1.0);
-       }
+       	
+   	float3 surfaceHsl = RGBtoHSL(color);
+   	surfaceHsl.y = 0.0;
+   	surfaceHsl.z = 0.5;
+   	float3 surface = b*0.5;
+   	
+   	float3 result = 0;
+   	result = (
+			fLightMult*light*(color+fLightOffset)
+			+fSourceColor*color
+	   )/(0.9+fLightNormalize);
+	   
+		float correctedAo = pow(ao,fAOMultiplier*(depth<=fWeaponDepth ? 0.2 : 1.0));
+    	if(bAOProtectLight) {
+    		correctedAo = lb+correctedAo*(1.0-lb);
+    	}
+    	
+   	result *= correctedAo;
+		
+   	float preserveWhite = pow(b,fPreservePower);
+   	float preserveDark = pow(1.0-b,fPreservePower);
+   	float preserveUnsaturated = 0;//pow(1.0-colorHsl.y,fPreservePower);
+   	float preserve = max(max(preserveUnsaturated,preserveWhite),preserveDark);
+   	
+   	
+   	
+   	outPixel = float4(saturate(preserve*color+(1.0-preserve)*result),1.0);
+
        
        
        outDepth = float4(getDepth(coords),0,0,1);
@@ -1219,31 +1153,34 @@ namespace DHRTGI2 {
     
     void PS_DisplayResult(in float4 position : SV_Position, in float2 coords : TEXCOORD, out float4 outPixel : SV_Target)
     {
-        float4 color = getColorSampler(resultSampler,coords);
-        
-        if(bDebug) {
-            float b = getBrightness(color.rgb);
-            float ao = max(getColorSampler(smoothAOPass3Sampler,coords).r,b);
-            color = ao * getColorSampler(smoothPass3Sampler,coords);
-            color.a = 1;
-        }
-        /*
-        if(bDebug) {
-            color = getColorSampler(lightPassAOSampler,coords);
-            color.a = 1;
-        }
-        */
-        
+    	float4 color = getColorSampler(resultSampler,coords);
+    	
+    	if(bDebug) {
+    		float b = getBrightness(color.rgb);
+        	float ao = getColorSampler(smoothAOPassSampler,coords).r;
+        	float4 light = getColorSampler(lightAccuSampler,coords);
+        	float lb = getBrightness(light.rgb);
+        	
+        	float depth = getDepth(coords);
+        	float correctedAo = pow(ao,fAOMultiplier*(depth<=fWeaponDepth ? 0.2 : 1.0));
+    		if(bAOProtectLight) {
+        		correctedAo = lb+correctedAo*(1.0-lb);
+        	}
+    		color = correctedAo * light;
+    		color.a = 1;
+    	}
+    	/*
+    	if(bDebug) {
+    		color = getColorSampler(lightPassAOSampler,coords);
+    		color.a = 1;
+    	}
+    	*/
+    	
         outPixel = color;
     }
     
     
-    technique DH_RTGI2 {
-        pass {
-            VertexShader = PostProcessVS;
-            PixelShader = PS_DepthPass;
-            RenderTarget = depthTex;
-        }
+    technique DH_RTGI {
         pass {
             VertexShader = PostProcessVS;
             PixelShader = PS_NormalPass;
@@ -1255,23 +1192,38 @@ namespace DHRTGI2 {
             RenderTarget = lightPassTex;
             RenderTarget1 = lightPassHitTex;
             RenderTarget2 = lightPassAOTex;
-            
-            ClearRenderTargets = false;
-                        
-            BlendEnable = true;
-            BlendOp = ADD;
-
-            // The data source and optional pre-blend operation used for blending.
-            // Available values:
-            //   ZERO, ONE,
-            //   SRCCOLOR, SRCALPHA, INVSRCCOLOR, INVSRCALPHA
-            //   DESTCOLOR, DESTALPHA, INVDESTCOLOR, INVDESTALPHA
-            SrcBlend = SRCALPHA;
-            SrcBlendAlpha = ONE;
-            DestBlend = INVSRCALPHA;
-            DestBlendAlpha = ONE;
         }
         pass {
+            VertexShader = PostProcessVS;
+            PixelShader = PS_FillGapPass1;
+            RenderTarget = fillGapPass1Tex;
+        }
+        pass {
+            VertexShader = PostProcessVS;
+            PixelShader = PS_FillGapPass2;
+            RenderTarget = fillGapPass2Tex;
+        }
+        pass {
+            VertexShader = PostProcessVS;
+            PixelShader = PS_FillGapPass3;
+            RenderTarget = fillGapPass3Tex;
+            
+            ClearRenderTargets = true;
+            
+            BlendEnable = true;
+			BlendOp = ADD;
+
+			// The data source and optional pre-blend operation used for blending.
+			// Available values:
+			//   ZERO, ONE,
+			//   SRCCOLOR, SRCALPHA, INVSRCCOLOR, INVSRCALPHA
+			//   DESTCOLOR, DESTALPHA, INVDESTCOLOR, INVDESTALPHA
+			SrcBlend = SRCALPHA;
+			SrcBlendAlpha = ONE;
+			DestBlend = INVSRCALPHA;
+			DestBlendAlpha = ONE;
+        }
+		pass {
             VertexShader = PostProcessVS;
             PixelShader = PS_SmoothPass;
             RenderTarget = smoothPassTex;
@@ -1280,59 +1232,37 @@ namespace DHRTGI2 {
             ClearRenderTargets = false;
             
             BlendEnable = true;
-            BlendOp = ADD;
+			BlendOp = ADD;
 
-            // The data source and optional pre-blend operation used for blending.
-            // Available values:
-            //   ZERO, ONE,
-            //   SRCCOLOR, SRCALPHA, INVSRCCOLOR, INVSRCALPHA
-            //   DESTCOLOR, DESTALPHA, INVDESTCOLOR, INVDESTALPHA
-            SrcBlend = SRCALPHA;
-            SrcBlendAlpha = ONE;
-            DestBlend = INVSRCALPHA;
-            DestBlendAlpha = ONE;
+			// The data source and optional pre-blend operation used for blending.
+			// Available values:
+			//   ZERO, ONE,
+			//   SRCCOLOR, SRCALPHA, INVSRCCOLOR, INVSRCALPHA
+			//   DESTCOLOR, DESTALPHA, INVDESTCOLOR, INVDESTALPHA
+			SrcBlend = SRCALPHA;
+			SrcBlendAlpha = ONE;
+			DestBlend = INVSRCALPHA;
+			DestBlendAlpha = ONE;
         }
         pass {
             VertexShader = PostProcessVS;
-            PixelShader = PS_SmoothPass2;
-            RenderTarget = smoothPass2Tex;
-            RenderTarget1 = smoothAOPass2Tex;
+            PixelShader = PS_AccuPass;
+            RenderTarget = lightAccuTex;
 
             ClearRenderTargets = false;
             
             BlendEnable = true;
-            BlendOp = ADD;
+			BlendOp = ADD;
 
-            // The data source and optional pre-blend operation used for blending.
-            // Available values:
-            //   ZERO, ONE,
-            //   SRCCOLOR, SRCALPHA, INVSRCCOLOR, INVSRCALPHA
-            //   DESTCOLOR, DESTALPHA, INVDESTCOLOR, INVDESTALPHA
-            SrcBlend = SRCALPHA;
-            SrcBlendAlpha = ONE;
-            DestBlend = INVSRCALPHA;
-            DestBlendAlpha = ONE;
-        }
-        pass {
-            VertexShader = PostProcessVS;
-            PixelShader = PS_SmoothPass3;
-            RenderTarget = smoothPass3Tex;
-            RenderTarget1 = smoothAOPass3Tex;
-
-            ClearRenderTargets = false;
-            
-            BlendEnable = true;
-            BlendOp = ADD;
-
-            // The data source and optional pre-blend operation used for blending.
-            // Available values:
-            //   ZERO, ONE,
-            //   SRCCOLOR, SRCALPHA, INVSRCCOLOR, INVSRCALPHA
-            //   DESTCOLOR, DESTALPHA, INVDESTCOLOR, INVDESTALPHA
-            SrcBlend = SRCALPHA;
-            SrcBlendAlpha = ONE;
-            DestBlend = INVSRCALPHA;
-            DestBlendAlpha = ONE;
+			// The data source and optional pre-blend operation used for blending.
+			// Available values:
+			//   ZERO, ONE,
+			//   SRCCOLOR, SRCALPHA, INVSRCCOLOR, INVSRCALPHA
+			//   DESTCOLOR, DESTALPHA, INVDESTCOLOR, INVDESTALPHA
+			SrcBlend = SRCALPHA;
+			SrcBlendAlpha = ONE;
+			DestBlend = INVSRCALPHA;
+			DestBlendAlpha = ONE;
         }
         pass {
             VertexShader = PostProcessVS;
