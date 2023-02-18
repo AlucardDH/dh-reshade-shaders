@@ -47,7 +47,7 @@ namespace DH2 {
     uniform bool bDebug <
         ui_category = "Setting";
         ui_label = "Display reflection only";
-    > = true;
+    > = false;
 	
     uniform float fDepthMultiplier <
         ui_type = "slider";
@@ -55,7 +55,7 @@ namespace DH2 {
         ui_label = "Depth multiplier";
         ui_min = 0.1; ui_max = 100;
         ui_step = 0.1;
-    > = 0.5;
+    > = 1.0;
 
     uniform int iFrameAccu <
         ui_type = "slider";
@@ -63,7 +63,7 @@ namespace DH2 {
         ui_label = "Temporal accumulation";
         ui_min = 1; ui_max = 16;
         ui_step = 1;
-    > = 2;
+    > = 3;
     
     uniform float fSkyDepth <
         ui_type = "slider";
@@ -72,6 +72,14 @@ namespace DH2 {
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
     > = 0.99;
+    
+    uniform float fSkyFading <
+        ui_type = "slider";
+        ui_category = "Setting";
+        ui_label = "Sky fading";
+        ui_min = 0.0; ui_max = 1.0;
+        ui_step = 0.01;
+    > = 0.75;
 
 
     
@@ -93,7 +101,7 @@ namespace DH2 {
         ui_label = "Search Distance";
         ui_min = 1; ui_max = BUFFER_WIDTH;
         ui_step = 1;
-    > = 240;
+    > = 200;
     
     uniform int iRayPreciseHit <
         ui_type = "slider";
@@ -101,7 +109,7 @@ namespace DH2 {
         ui_label = "Precise hit passes";
         ui_min = 0; ui_max = 8;
         ui_step = 1;
-    > = 8;
+    > = 4;
     
     uniform int iRayPreciseHitSteps <
         ui_type = "slider";
@@ -126,7 +134,7 @@ namespace DH2 {
         ui_label = "Step multiply";
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
-    > = 0.15;
+    > = 0.30;
 
     uniform float fRayHitDepthThreshold <
         ui_type = "slider";
@@ -134,7 +142,7 @@ namespace DH2 {
         ui_label = "Ray Hit Depth Threshold";
         ui_min = 0.01; ui_max = 10;
         ui_step = 0.01;
-    > = 0.1;
+    > = 0.25;
   
     
     uniform float fJitter <
@@ -143,7 +151,7 @@ namespace DH2 {
         ui_label = "Jitter";
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
-    > = 0.1;
+    > = 0.5;
     
 // LIGHT COLOR
    
@@ -163,7 +171,7 @@ namespace DH2 {
         ui_label = "Orientation bias";
         ui_min = 0; ui_max = 1.0;
         ui_step = 0.01;
-    > = 0.5;
+    > = 0.50;
     
     uniform float fRayBounce <
         ui_type = "slider";
@@ -171,7 +179,7 @@ namespace DH2 {
         ui_label = "Bounce strength";
         ui_min = 0; ui_max = 1.0;
         ui_step = 0.01;
-    > = 0.2;
+    > = 0.1;
     
     uniform float fOutRatio <
         ui_type = "slider";
@@ -179,7 +187,7 @@ namespace DH2 {
         ui_label = "Out screen brightness";
         ui_min = 0.0; ui_max = 1;
         ui_step = 0.01;
-    > = 0.5;
+    > = 0.75;
         
     uniform float fFadePower <
         ui_type = "slider";
@@ -187,35 +195,9 @@ namespace DH2 {
         ui_label = "Distance Fading";
         ui_min = 0.1; ui_max = 10;
         ui_step = 0.01;
-    > = 1.0;
+    > = 0.4;
     
 // SMOTTHING
-
-    uniform bool bSmoothIgnoreMiss <
-        ui_category = "Smoothing";
-        ui_label = "Ignore misses";
-    > = true;
-    
-    uniform float fSmoothIgnoreMissRatio <
-        ui_type = "slider";
-        ui_category = "Smoothing";
-        ui_label = "Ignore miss ratio";
-        ui_min = 0; ui_max = 1;
-        ui_step = 0.01;
-    > = 0.5;
-    
-    uniform bool bSmoothIgnoreWhiteSpot <
-        ui_category = "Smoothing";
-        ui_label = "Ignore white spot";
-    > = true;
-    
-    uniform float fSmoothWhiteSpotThreshold <
-        ui_type = "slider";
-        ui_category = "Smoothing";
-        ui_label = "White spot threshold";
-        ui_min = 0; ui_max = 1;
-        ui_step = 0.01;
-    > = 0.05;
     
     uniform int iSmoothRadius <
         ui_type = "slider";
@@ -231,7 +213,7 @@ namespace DH2 {
         ui_label = "Depth Threshold";
         ui_min = 0.01; ui_max = 0.2;
         ui_step = 0.01;
-    > = 0.02;
+    > = 0.04;
 
     uniform float fSmoothNormalThreshold <
         ui_type = "slider";
@@ -239,7 +221,7 @@ namespace DH2 {
         ui_label = "Normal Threshold";
         ui_min = 0; ui_max = 2;
         ui_step = 0.01;
-    > = 0.5;
+    > = 0.35;
  
 // MERGING
     
@@ -257,7 +239,7 @@ namespace DH2 {
         ui_label = "Light multiplier";
         ui_min = 0.1; ui_max = 10;
         ui_step = 0.01;
-    > = 1.35;
+    > = 1.20;
 
 	
     float2 PixelSize() {
@@ -443,159 +425,131 @@ namespace DH2 {
     }
 
     void PS_LightPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outColor : SV_Target0, out float4 outHit : SV_Target1) {
-        if(!isPixelTreated(coords)) {
-            return;
-        }
 
 		float depth = getDepth(coords);
 		if(depth>fSkyDepth) {
-			return;
-		}
+			outColor = float4(1,1,1,1.0);
+			outHit = float4(0.5,0.5,0.5,0.0);
+		} else {
 		
-        float3 targetWp = getWorldPosition(coords);
-        float3 targetNormal = getNormal(coords);
-
-        float3 lightVector = reflect(targetWp,targetNormal);
-        
-        float3 jitter = tex2Dfetch(blueNoiseSampler,(framecount+coords*BUFFER_SIZE)%NOISE_SIZE).rgb-0.5;
-        lightVector += jitter*fJitter;
-        lightVector = normalize(lightVector);
-        
-       // float4 hitColor = trace(targetWp,lightVector);
-        float4 hitPosition = trace(targetWp,lightVector);
-        if(hitPosition.a==0) {
-        	// no hit
-        } else {
-        	float3 screenCoords = getScreenPosition(hitPosition.xyz);
-        	float4 color = getRayColor(screenCoords.xy);
-        	float b = getBrightness(color.rgb);
-                        
-        	float distance = 1+0.02*distance(hitPosition.xyz,targetWp);
-        	float distanceRatio = 0.1+1.0/pow(distance,fFadePower);//(1-pow(distance,fFadePower)/pow(iRayDistance,fFadePower));
+	        float3 targetWp = getWorldPosition(coords);
+	        float3 targetNormal = getNormal(coords);
+	
+	        float3 lightVector = reflect(targetWp,targetNormal);
 	        
-	        //outColor = float4(hitPosition.a*(0.5+b)*distanceRatio*color.rgb,1.0);
-			outColor = float4(hitPosition.a*distanceRatio*color.rgb,1.0);
-	  	  outHit = float4(screenCoords,1.0);			
+	        float3 jitter = tex2Dfetch(blueNoiseSampler,(framecount+coords*BUFFER_SIZE)%NOISE_SIZE).rgb-0.5;
+	        lightVector += jitter*fJitter;
+	        lightVector = normalize(lightVector);
+	        
+	       // float4 hitColor = trace(targetWp,lightVector);
+	        float4 hitPosition = trace(targetWp,lightVector);
+	        if(hitPosition.a==0) {
+	        	// no hit
+	        } else {
+	        	float3 screenCoords = getScreenPosition(hitPosition.xyz);
+	        	float4 color = getRayColor(screenCoords.xy);
+	        	float b = getBrightness(color.rgb);
+	                        
+	        	float distance = 1+0.02*distance(hitPosition.xyz,targetWp);
+	        	float distanceRatio = 0.1+1.0/pow(distance,fFadePower);//(1-pow(distance,fFadePower)/pow(iRayDistance,fFadePower));
+		        
+		        //outColor = float4(hitPosition.a*(0.5+b)*distanceRatio*color.rgb,1.0);
+				outColor = float4(hitPosition.a*distanceRatio*color.rgb,1.0);
+		  	  outHit = float4(screenCoords,1.0);			
+	        }
         }
     }
     
     void PS_UpdateAccu(in float4 position : SV_Position, in float2 coords : TEXCOORD, out float4 outPixel : SV_Target)
     {
-        if(framecount%iFrameAccu!=iFrameAccu-1) discard;
-        outPixel = getColorSampler(lightPassSampler,coords);
+        outPixel = float4(getColorSampler(lightPassSampler,coords).rgb,1.0);///iFrameAccu);
     }
 
     void PS_SmoothPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outColor : SV_Target0) {
-		if(framecount%iFrameAccu!=iFrameAccu-1) discard;
         
         int2 coordsInt = toPixels(coords);
         float refDepth = getDepth(coords);
-        float3 refNormal = getNormal(coords);
+        if(refDepth>fSkyDepth) {
+			outColor = float4(1,1,1,1.0);
+		} else {
         
-        float4 result = 0;
-        float weightSum = 0;
-
-		float4 resultMiss = 0;
-        float weightSumMiss = 0;
+	        float3 refNormal = getNormal(coords);
+	        
+	        float4 result = 0;
+	        float weightSum = 0;
 	
-		float4 resultWhite = 0;
-        float weightSumWhite = 0;
-        
-        int2 offset = 0;
-        int radius = RES_SCALE*iSmoothRadius;
-        
-        float maxRadius2 = 1+radius*radius;
-        
-        int maxSamples = 0;
-        int foundSamples = 0;
-        int whiteSamples = 0;
-        int missSamples = 0;
-        
-        [loop]
-        for(offset.x=-radius;offset.x<=radius;offset.x++) {
-        	[loop]
-            for(offset.y=-radius;offset.y<=radius;offset.y++) {
-                float2 currentCoords = coords+offset*PixelSize();
-                
-                if(inScreen(currentCoords)) {
-                
-                     
-                    
-					float depth = getDepth(currentCoords);
-                    if(abs(depth-refDepth)<=fSmoothDepthThreshold) {
-                        float3 normal = getNormal(currentCoords);
-                        if(diffT(normal,refNormal,fSmoothNormalThreshold)) {
-                        	maxSamples++;
-                        	
-							float4 hitPos = getColorSampler(lightPassHitSampler,currentCoords);
-                    		float4 color = getColorSampler(lightAccuSampler,currentCoords);
-                   
-                        	
-                        	bool isWhiteSpot = iSmoothRadius>0 && bSmoothIgnoreWhiteSpot && getBrightness(color.rgb)>=fSmoothWhiteSpotThreshold;
-							bool miss = bSmoothIgnoreMiss && hitPos.a==0;
-                            float d2 = 1+dot(offset,offset);
-                            float weight = 2+1.0/d2;
-                            
-							if(isWhiteSpot)  {
-								resultWhite += color*weight;
-	                            weightSumWhite += weight;
-								whiteSamples++;
-							} else if(miss) {
-	                        	weightSumMiss += weight;     
-	                        	missSamples++;
-                            } else {
-                            	// hit
-                            	result += color*weight;
+			float4 resultMiss = 0;
+	        float weightSumMiss = 0;
+		
+			float4 resultWhite = 0;
+	        float weightSumWhite = 0;
+	        
+	        int2 offset = 0;
+	        int radius = RES_SCALE*iSmoothRadius;
+	        
+	        float maxRadius2 = 1+radius*radius;
+	        
+	        [loop]
+	        for(offset.x=-radius;offset.x<=radius;offset.x++) {
+	        	[loop]
+	            for(offset.y=-radius;offset.y<=radius;offset.y++) {
+	                float2 currentCoords = coords+offset*PixelSize();
+	                
+	                if(inScreen(currentCoords)) {
+	                
+	                     
+	                    
+						float depth = getDepth(currentCoords);
+						if(depth>fSkyDepth) continue;
+	                    if(abs(depth-refDepth)<=fSmoothDepthThreshold) {
+	                        float3 normal = getNormal(currentCoords);
+	                        if(diffT(normal,refNormal,fSmoothNormalThreshold)) {
+	                        	
+								float4 hitPos = getColorSampler(lightPassHitSampler,currentCoords);
+	                    		float4 color = getColorSampler(lightAccuSampler,currentCoords);
+	                   
+	                        	
+	                        	float d2 = 1+dot(offset,offset);
+	                            float weight = 2+1.0/d2;
+	                            
+								// hit
+	                        	result += color*weight;
 	                            weightSum += weight;
-	                            foundSamples++;
-                            }
-
-                        } // end normal
-                    } // end depth                 
-                } // end inScreen
-            } // end for y
-        } // end for x
-        
-        if(iSmoothRadius>0 && bSmoothIgnoreWhiteSpot && (foundSamples+whiteSamples)<=1) {
-        	// not enough
-        	outColor = float4(0,0,0,1);
-        	return;
+	                        } // end normal
+	                    } // end depth                 
+	                } // end inScreen
+	            } // end for y
+	        } // end for x
+	
+	        if(weightSum>0) {
+				result.rgb = saturate(fLightMult*result.rgb/weightSum);
+			}
+			        
+	        if(bOrientation) {
+	        	
+		        float3 normal = getNormal(coords);
+		        float cos = dot(normal,float3(0,0,1));
+		        result.rgb *= saturate(fOrientationBias+1-cos);
+	        }
+	        
+	        result.a = 1.0/iFrameAccu;
+	        outColor = result;
         }
-        
-        if(bSmoothIgnoreWhiteSpot && whiteSamples>1) {
-        	result += resultWhite;
-	        weightSum += weightSumWhite;    
-			foundSamples += whiteSamples;         
-        }
-        
-
-
-		float foundRatio = float(foundSamples)/maxSamples;
-        if(bSmoothIgnoreMiss && foundRatio<fSmoothIgnoreMissRatio) {
-        	//result += resultMiss;
-	        //weightSum += weightSumMiss;
-	        //foundSamples += missSamples;
-        	result *= foundRatio/fSmoothIgnoreMissRatio;
-        }
-        
-        if(weightSum>0) {
-			result.rgb = saturate(fLightMult*result.rgb/weightSum);
-		}
-		        
-        if(bOrientation) {
-        	
-	        float3 normal = getNormal(coords);
-	        float cos = dot(normal,float3(0,0,1));
-	        result.rgb *= saturate(fOrientationBias+1-cos);
-        }
-        
-        result.a = 1.0;//1.0/iFrameAccu;
-        outColor = result;
     }
     
     void PS_UpdateResult(in float4 position : SV_Position, in float2 coords : TEXCOORD, out float4 outPixel : SV_Target)
     {
+    	float depth = getDepth(coords);
         float3 color = getColor(coords).rgb;
+        float depthRatio = 1.0;
+        if(depth>fSkyDepth) {
+        	depthRatio = 0.0;
+        } else if(depth>fSkyFading) {
+        	float total = fSkyDepth-fSkyFading;
+        	depthRatio = 1.0-(depth-fSkyFading)/total;
+        }
+
+	        
         float3 light = getColorSampler(smoothPassSampler,coords).rgb;
         float b = getBrightness(color);
         float lb = getBrightness(light);
@@ -604,7 +558,7 @@ namespace DH2 {
         //result = color*b+result*(1.0-b);
         //float4 result = fSourceColor*color+fLightMult*light*saturate(1.0-b)*(max(0,1.0-b-fSourceOffset));
         float3 result = fSourceColor*color+fLightMult*(b<=0.5 ? b : 1-b)*light;
-        outPixel = float4(result,1.0);
+        outPixel = float4(depthRatio*result+(1.0-depthRatio)*color,1.0);
     }
     
     void PS_DisplayResult(in float4 position : SV_Position, in float2 coords : TEXCOORD, out float4 outPixel : SV_Target)
@@ -621,15 +575,6 @@ namespace DH2 {
             VertexShader = PostProcessVS;
             PixelShader = PS_NormalPass;
             RenderTarget = normalTex;
-        }
-        pass
-        {
-            VertexShader = PostProcessVS;
-            PixelShader = PS_ClearAccu;
-            RenderTarget = lightPassTex;
-            RenderTarget1 = lightPassHitTex;
-            
-            ClearRenderTargets = false;
         }
         pass {
             VertexShader = PostProcessVS;
@@ -659,6 +604,19 @@ namespace DH2 {
             RenderTarget = lightAccuTex;
             
             ClearRenderTargets = false;
+            
+            BlendEnable = true;
+			BlendOp = ADD;
+
+			// The data source and optional pre-blend operation used for blending.
+			// Available values:
+			//   ZERO, ONE,
+			//   SRCCOLOR, SRCALPHA, INVSRCCOLOR, INVSRCALPHA
+			//   DESTCOLOR, DESTALPHA, INVDESTCOLOR, INVDESTALPHA
+			SrcBlend = SRCALPHA;
+			SrcBlendAlpha = ONE;
+			DestBlend = INVSRCALPHA;
+			DestBlendAlpha = ONE;
         }
 		pass {
             VertexShader = PostProcessVS;
@@ -666,6 +624,19 @@ namespace DH2 {
             RenderTarget = smoothPassTex;
 
             ClearRenderTargets = false;
+            
+            BlendEnable = true;
+			BlendOp = ADD;
+
+			// The data source and optional pre-blend operation used for blending.
+			// Available values:
+			//   ZERO, ONE,
+			//   SRCCOLOR, SRCALPHA, INVSRCCOLOR, INVSRCALPHA
+			//   DESTCOLOR, DESTALPHA, INVDESTCOLOR, INVDESTALPHA
+			SrcBlend = SRCALPHA;
+			SrcBlendAlpha = ONE;
+			DestBlend = INVSRCALPHA;
+			DestBlendAlpha = ONE;
         }
         pass {
             VertexShader = PostProcessVS;
