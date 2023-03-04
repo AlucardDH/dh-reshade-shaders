@@ -1,6 +1,8 @@
 #include "Reshade.fxh"
 
-#define RES_SCALE 2
+#ifndef RES_SCALE
+ #define RES_SCALE 2
+#endif
 #define RES_WIDTH (BUFFER_WIDTH/RES_SCALE)
 #define RES_HEIGHT (BUFFER_HEIGHT/RES_SCALE)
 
@@ -11,7 +13,6 @@
 #define PI 3.14159265359
 #define SQRT2 1.41421356237
 
-#define getDepth(c) ReShade::GetLinearizedDepth(c)
 #define getNormal(c) (tex2Dlod(normalSampler,float4(c,0,0)).xyz-0.5)*2
 #define getColorSampler(s,c) tex2Dlod(s,float4(c,0,0))
 #define getColor(c) tex2Dlod(ReShade::BackBuffer,float4(c,0,0))
@@ -22,6 +23,9 @@ namespace DH2 {
 
     texture blueNoiseTex < source ="LDR_RGBA_0.png" ; > { Width = NOISE_SIZE; Height = NOISE_SIZE; MipLevels = 1; Format = RGBA8; };
     sampler blueNoiseSampler { Texture = blueNoiseTex; };
+
+    texture roughnessTex { Width = RES_WIDTH; Height = RES_HEIGHT; Format = RGBA8; };
+    sampler roughnessSampler { Texture = roughnessTex; };
 
     texture normalTex { Width = RES_WIDTH; Height = RES_HEIGHT; Format = RGBA8; };
     sampler normalSampler { Texture = normalTex; };
@@ -48,6 +52,28 @@ namespace DH2 {
         ui_category = "Setting";
         ui_label = "Display reflection only";
     > = false;
+
+    uniform bool bRoughness <
+        ui_type = "slider";
+        ui_category = "Roughness";
+        ui_label = "Enable";
+    > = true;
+    
+    uniform int iRoughnessRadius <
+        ui_type = "slider";
+        ui_category = "Roughness";
+        ui_label = "Radius";
+        ui_min = 1; ui_max = 4;
+        ui_step = 1;
+    > = 2;
+    
+    uniform float fRoughnessReflexivity <
+        ui_type = "slider";
+        ui_category = "Roughness";
+        ui_label = "Intensity";
+        ui_min = 0; ui_max = 4.0;
+        ui_step = 0.01;
+    > = 1.0;
 	
     uniform float fDepthMultiplier <
         ui_type = "slider";
@@ -154,11 +180,6 @@ namespace DH2 {
     > = 0.5;
     
 // LIGHT COLOR
-   
-	 uniform bool bRayOutScreenHit <
-        ui_category = "Ray color";
-        ui_label = "Out screen hit";
-    > = true;
     
     uniform bool bOrientation <
         ui_category = "Ray color";
@@ -213,7 +234,7 @@ namespace DH2 {
         ui_label = "Depth Threshold";
         ui_min = 0.01; ui_max = 0.2;
         ui_step = 0.01;
-    > = 0.04;
+    > = 0.01;
 
     uniform float fSmoothNormalThreshold <
         ui_type = "slider";
@@ -221,7 +242,7 @@ namespace DH2 {
         ui_label = "Normal Threshold";
         ui_min = 0; ui_max = 2;
         ui_step = 0.01;
-    > = 0.35;
+    > = 0.20;
  
 // MERGING
     
@@ -236,7 +257,7 @@ namespace DH2 {
     uniform float fLightMult <
         ui_type = "slider";
         ui_category = "Merging";
-        ui_label = "Light multiplier";
+        ui_label = "Reflection";
         ui_min = 0.1; ui_max = 10;
         ui_step = 0.01;
     > = 1.20;
@@ -275,6 +296,20 @@ namespace DH2 {
 
         return accuStart<=v && v<accuStart+accuWidth;
     }
+    
+    float getRoughness(float2 coords) {
+    	return getColorSampler(roughnessSampler,coords).r;
+    }
+    
+    float getDepth(float2 coords) {
+    	float depth = ReShade::GetLinearizedDepth(coords);
+    	if(bRoughness) {
+    		float r = log(1.0+getRoughness(coords));
+    		depth += fRoughnessReflexivity*r*(1.0-depth)/100.0;
+    		
+    	}
+    	return depth;
+    }
 
     float3 getWorldPosition(float2 coords) {
         float depth = getDepth(coords);
@@ -288,6 +323,32 @@ namespace DH2 {
         result.xy /= result.z;
         return float3(result.xy+0.5,result.z);
     }
+    
+    void PS_RoughnessPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outRoughness : SV_Target0) {
+    	if(!bRoughness) discard;
+        
+        float3 refColor = getColor(coords).rgb;
+        float refB = getBrightness(refColor);
+        float roughness = 0.0;
+        for(int d = -iRoughnessRadius;d<=iRoughnessRadius;d++) {
+        	if(d!=0) {
+	        	float3 color = getColor(float2(coords.x+ReShade::PixelSize.x*d,coords.y)).rgb;
+	        	float b = getBrightness(color);
+	        	float diff = abs(refB-b);
+	        	roughness = max(roughness,5*diff/abs(d));
+        	}
+        }
+        for(int d = -iRoughnessRadius;d<=iRoughnessRadius;d++) {
+        	if(d!=0) {
+	        	float3 color = getColor(float2(coords.x+ReShade::PixelSize.x*d,coords.y)).rgb;
+	        	float b = getBrightness(color);
+	        	float diff = abs(refB-b);
+	        	roughness = max(roughness,5*diff/abs(d));
+        	}
+        }
+        
+        outRoughness = float4(roughness,roughness,roughness,1.0);
+    }
 
     void PS_NormalPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outNormal : SV_Target0) {
         float3 offset = float3(PixelSize().xy, 0.0);
@@ -297,7 +358,7 @@ namespace DH2 {
         float3 posEast   = getWorldPosition(coords + offset.xz);
         float3 normal = normalize(cross(posCenter - posNorth, posCenter - posEast));
         
-        outNormal = float4(normal/2.0+0.5,1.0);
+        outNormal = float4(normal/2.0+0.5,1.0/iFrameAccu);
     }
     
     float4 getRayColor(float2 coords) {
@@ -332,7 +393,6 @@ namespace DH2 {
 			bool outSearch = !bRayUntilHit && traceDistance>=iRayDistance;
 			
 			bool outScreen = !inScreen(screenCoords);
-			if(outScreen && !bRayOutScreenHit) return 0.0;
             
             float3 screenWp = getWorldPosition(screenCoords.xy);
             
@@ -395,13 +455,7 @@ namespace DH2 {
             		currentWp -= incrementVector;
             		screenCoords = getScreenPosition(currentWp);
             				
-            		//if(screenCoords.z>fSkyDepth) {
-            		//	return float4(currentWp,1.0);
-            		if(bRayOutScreenHit) {
-	                	return float4(crossed ? lastCross : currentWp,fOutRatio);
-					} else {
-						return 0.0;
-					}
+            		return float4(crossed ? lastCross : currentWp,fOutRatio);
 				}
             	outSource = abs(deltaZ)>fRayHitDepthThreshold;
             }
@@ -469,9 +523,10 @@ namespace DH2 {
         
         int2 coordsInt = toPixels(coords);
         float refDepth = getDepth(coords);
-        if(refDepth>fSkyDepth) {
-			outColor = float4(1,1,1,1.0);
-		} else {
+
+        //if(refDepth>fSkyDepth) {
+		//	outColor = float4(1,1,1,1.0);
+		//} else {
         
 	        float3 refNormal = getNormal(coords);
 	        
@@ -528,20 +583,32 @@ namespace DH2 {
 	        if(bOrientation) {
 	        	
 		        float3 normal = getNormal(coords);
-		        float cos = dot(normal,float3(0,0,1));
-		        result.rgb *= saturate(fOrientationBias+1-cos);
+		        //float cos = dot(normal,float3(0,0,1));
+		        float cos = dot(normal,float3(coords-0.5,1));
+		        //result.rgb *= saturate(fOrientationBias+1-cos);
+		        float3 corrected = saturate((-cos+1.0)*result.rgb/2.0);
+		        result.rgb = fOrientationBias*corrected+(1.0-fOrientationBias)*result.rgb;
 	        }
 	        
 	        result.a = 1.0/iFrameAccu;
 	        outColor = result;
-        }
+        //}
     }
     
     void PS_UpdateResult(in float4 position : SV_Position, in float2 coords : TEXCOORD, out float4 outPixel : SV_Target)
     {
+
     	float depth = getDepth(coords);
         float3 color = getColor(coords).rgb;
         float depthRatio = 1.0;
+        float rRatio = 1.0;
+		float r = 0.0;
+		if(bRoughness) {
+			r = getRoughness(coords);
+			rRatio = fRoughnessReflexivity;
+		} 
+        
+        
         if(depth>fSkyDepth) {
         	depthRatio = 0.0;
         } else if(depth>fSkyFading) {
@@ -557,8 +624,8 @@ namespace DH2 {
         //float4 result = saturate((fSourceOffset+color)*(fSourceColor+pow(light+fLightOffset,fLightPow)));
         //result = color*b+result*(1.0-b);
         //float4 result = fSourceColor*color+fLightMult*light*saturate(1.0-b)*(max(0,1.0-b-fSourceOffset));
-        float3 result = fSourceColor*color+fLightMult*(b<=0.5 ? b : 1-b)*light;
-        outPixel = float4(depthRatio*result+(1.0-depthRatio)*color,1.0);
+        float3 result = (1-r)*fSourceColor*color+fLightMult*(b<=0.5 ? b : 1.0-b)*light;
+        outPixel = float4(min(1.-b,depthRatio)*result+max(b,1.0-depthRatio)*color,1.0);
     }
     
     void PS_DisplayResult(in float4 position : SV_Position, in float2 coords : TEXCOORD, out float4 outPixel : SV_Target)
@@ -573,8 +640,28 @@ namespace DH2 {
     technique DH_SSR {
         pass {
             VertexShader = PostProcessVS;
+            PixelShader = PS_RoughnessPass;
+            RenderTarget = roughnessTex;
+        }
+        pass {
+            VertexShader = PostProcessVS;
             PixelShader = PS_NormalPass;
             RenderTarget = normalTex;
+            
+            ClearRenderTargets = false;
+						
+			BlendEnable = true;
+			BlendOp = ADD;
+
+			// The data source and optional pre-blend operation used for blending.
+			// Available values:
+			//   ZERO, ONE,
+			//   SRCCOLOR, SRCALPHA, INVSRCCOLOR, INVSRCALPHA
+			//   DESTCOLOR, DESTALPHA, INVDESTCOLOR, INVDESTALPHA
+			SrcBlend = SRCALPHA;
+			SrcBlendAlpha = ONE;
+			DestBlend = INVSRCALPHA;
+			DestBlendAlpha = ONE;
         }
         pass {
             VertexShader = PostProcessVS;
