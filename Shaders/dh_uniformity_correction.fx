@@ -18,6 +18,11 @@ namespace DHUniformityCorrection {
 	    ui_step = 0.1;
 	> = 0.5;
 	
+	uniform bool bGreuScale <
+	    ui_category = "Correction";
+		ui_label = "Grey scale";
+	> = true;
+	
 	uniform float fCorrection <
 	    ui_category = "Correction";
 		ui_label = "Correction strength";
@@ -25,7 +30,14 @@ namespace DHUniformityCorrection {
 	    ui_min = 0.0;
 	    ui_max = 1.0;
 	    ui_step = 0.05;
-	> = true;
+	> = 0.25;
+
+	uniform int iMethod <
+        ui_category = "Correction";
+        ui_type = "combo";
+        ui_label = "Method";
+        ui_items = "Additive\0Additive normalized\0Brightness proportional\0";
+    > = 0;
 
 //// textures
 
@@ -39,17 +51,27 @@ namespace DHUniformityCorrection {
 
 	void PS_Correction(float4 vpos : SV_Position, in float2 coords : TEXCOORD0, out float4 outPixel : SV_Target)
 	{
-		float4 color;
+		float3 color;
 		if(bSolidColor) {
 			color = fSolidColor;
-			color.a = 1.0;
 		} else {
-			color = tex2D(ReShade::BackBuffer,coords);
+			color = tex2D(ReShade::BackBuffer,coords).rgb;
 		}
 		
-		float4 defect = tex2D(uniformityDefectSampler,coords);
+		float3 defect = tex2D(uniformityDefectSampler,coords).rgb;
+		if(bGreuScale) {
+			defect = max(defect.r,max(defect.g,defect.b));
+		}
 	
-		outPixel = clamp(color*(1.0+fCorrection*(1.0-defect)),0,1);
+		if(iMethod==0) {
+			outPixel = float4(saturate(color*(1.0+fCorrection*(1.0-defect))),1.0);
+		} else if(iMethod==1) {
+			outPixel = float4(color*(1.0+fCorrection*(1.0-defect))/(1.0+fCorrection),1.0);
+		} else if(iMethod==2) {
+			float brightness = max(color.r,max(color.g,color.b));
+			outPixel = float4(saturate(color*(1.0+fCorrection*(1.0-defect)*(1.0-brightness))),1.0);
+		}
+		
 	}
 
 //// Techniques
