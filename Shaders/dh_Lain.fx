@@ -1,11 +1,8 @@
 #include "Reshade.fxh"
 
-#define BUFFER_SIZE int2(BUFFER_WIDTH,BUFFER_HEIGHT)
-
-namespace Lain {
+namespace DH_Lain {
 
 // Uniforms
-	uniform int framecount < source = "framecount"; >;
 
 	uniform bool bBorderBleed <
 	    ui_category = "Borders";
@@ -121,13 +118,18 @@ namespace Lain {
 	float getBrightness(float3 color) {
 		return (color.r+color.g+color.b)/3.0;
 	}
+	
+	
+	float4 getColor(float2 coords) {
+		return tex2Dlod(ReShade::BackBuffer,float4(coords,0.0,0.0));
+	}
 
 
 // Pixel shaders
 
 	void PS_result(in float4 position : SV_Position, in float2 coords : TEXCOORD, out float4 outPixel : SV_Target)
 	{
-		float4 color = tex2D(ReShade::BackBuffer,coords);
+		float4 color = getColor(coords);
 		float b = getBrightness(color.rgb);
 		float3 result = color.rgb;
 		if(b<=fBrightnessLimit) {
@@ -135,11 +137,11 @@ namespace Lain {
 			coordsBlood.x *= float(BUFFER_WIDTH)/BUFFER_HEIGHT;
 
 			if(bUseDepth) {
-				coordsBlood *= pow(2,ReShade::GetLinearizedDepth(coords));
+				coordsBlood *= pow(2.0,ReShade::GetLinearizedDepth(coords));
 			}
 			
 			float3 blood = tex2D(BloodStainSampler,coordsBlood).rgb;
-			float bloodRatio = fIntensity*pow(1.0-b/fBrightnessLimit,fCurvePower);
+			float bloodRatio = fIntensity*pow(saturate(1.0-b/fBrightnessLimit),fCurvePower);
 			blood *= bloodRatio;
 			
 		
@@ -150,9 +152,10 @@ namespace Lain {
 				float radius = stepSize;
 				for(radius=stepSize;!found && radius<=iBleedRadius;radius+=stepSize) {
 					delta.x = -radius;
+					[loop]
 					for(delta.y=-radius;!found && delta.y<=radius;delta.y++) {
 						float2 searchCoords = coords + delta*ReShade::PixelSize;
-						float4 searchColor = tex2D(ReShade::BackBuffer,searchCoords);
+						float4 searchColor = getColor(searchCoords);
 						float seachB = getBrightness(searchColor.rgb);
 						if(seachB>=fBrightnessLimit) {
 							found = true;
@@ -160,9 +163,10 @@ namespace Lain {
 					}
 					if(found) break;
 					delta.x = radius;
+					[loop]
 					for(delta.y=-radius;!found && delta.y<=radius;delta.y++) {
 						float2 searchCoords = coords + delta*ReShade::PixelSize;
-						float4 searchColor = tex2D(ReShade::BackBuffer,searchCoords);
+						float4 searchColor = getColor(searchCoords);
 						float seachB = getBrightness(searchColor.rgb);
 						if(seachB>=fBrightnessLimit) {
 							found = true;
@@ -170,9 +174,10 @@ namespace Lain {
 					}
 					if(found) break;
 					delta.y = -radius;
+					[loop]
 					for(delta.x=-radius+1;!found && delta.x<=radius-1;delta.x++) {
 						float2 searchCoords = coords + delta*ReShade::PixelSize;
-						float4 searchColor = tex2D(ReShade::BackBuffer,searchCoords);
+						float4 searchColor = getColor(searchCoords);
 						float seachB = getBrightness(searchColor.rgb);
 						if(seachB>=fBrightnessLimit) {
 							found = true;
@@ -180,9 +185,10 @@ namespace Lain {
 					}
 					if(found) break;
 					delta.y = radius;
+					[loop]
 					for(delta.x=-radius+1;!found && delta.x<=radius-1;delta.x++) {
 						float2 searchCoords = coords + delta*ReShade::PixelSize;
-						float4 searchColor = tex2D(ReShade::BackBuffer,searchCoords);
+						float4 searchColor = getColor(searchCoords);
 						float seachB = getBrightness(searchColor.rgb);
 						if(seachB>=1.0-fBrightnessLimit) {
 							found = true;
@@ -199,7 +205,7 @@ namespace Lain {
 			coordsCloud.x *= float(BUFFER_WIDTH)/BUFFER_HEIGHT;
 			
 			float3 cloud = tex2D(CloudStainSampler,coordsCloud).rgb;
-			cloud *= fCloudIntensity*pow(1.0-b/fBrightnessLimit,fCloudCurvePower);
+			cloud *= fCloudIntensity*pow(saturate(1.0-b/fBrightnessLimit),fCloudCurvePower);
 			
 			
 			result += max(blood,cloud);
@@ -213,7 +219,7 @@ namespace Lain {
 	
 // Techniques
 
-	technique Lain <
+	technique DH_Lain <
 	>
 	{
 		pass
