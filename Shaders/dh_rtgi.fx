@@ -613,7 +613,7 @@ namespace DHRTGI {
 	        normal/=5.0;
         }
        	
-        outNormal = float4(normal/2.0+0.5,1.0);
+        outNormal = float4(normal/2.0+0.5,1.0/iFrameAccu);
         
     }
     
@@ -1064,7 +1064,6 @@ namespace DHRTGI {
         	// not enough
         	result = getColorSampler(lightPassSampler,coords).rgb;
         	resultAO = 1.0;
-    		return;
         } 
         
         //result = float(foundSamples)/10;//saturate(fLightMult*result/weightSum);
@@ -1105,50 +1104,46 @@ namespace DHRTGI {
         float depth = getDepth(coords);
         if(depth>fSkyDepth) {
         	outPixel = float4(color,1.0);
-        	return;
-		}
-		
-        
-		float3 colorHsl = RGBtoHSL(color);
-        float3 light = getColorSampler(lightAccuSampler,coords).rgb;
-        float3 lightHsl = RGBtoHSL(light);
-        
-        float b = getBrightness(color);
-        float lb = getBrightness(light);
-        
-        float ao = max(getColorSampler(smoothAOPassSampler,coords).r,b);
-        
-       	
-   	float3 surfaceHsl = RGBtoHSL(color);
-   	surfaceHsl.y = 0.0;
-   	surfaceHsl.z = 0.5;
-   	float3 surface = b*0.5;
-   	
-   	float3 result = 0;
-   	result = (
-			fLightMult*light*(color+fLightOffset)
-			+fSourceColor*color
-	   )/(0.9+fLightNormalize);
-	   
-		float correctedAo = pow(ao,fAOMultiplier*(depth<=fWeaponDepth ? 0.2 : 1.0));
-    	if(bAOProtectLight) {
-    		correctedAo = lb+correctedAo*(1.0-lb);
-    	}
-    	
-   	result *= correctedAo;
-		
-   	float preserveWhite = pow(b,fPreservePower);
-   	float preserveDark = pow(1.0-b,fPreservePower);
-   	float preserveUnsaturated = 0;//pow(1.0-colorHsl.y,fPreservePower);
-   	float preserve = max(max(preserveUnsaturated,preserveWhite),preserveDark);
-   	
-   	
-   	
-   	outPixel = float4(saturate(preserve*color+(1.0-preserve)*result),1.0);
+		} else {
 
-       
-       
-       outDepth = float4(getDepth(coords),0,0,1);
+			float3 colorHsl = RGBtoHSL(color);
+	        float3 light = getColorSampler(lightAccuSampler,coords).rgb;
+	        float3 lightHsl = RGBtoHSL(light);
+	        
+	        float b = getBrightness(color);
+	        float lb = getBrightness(light);
+	        
+	        float ao = max(getColorSampler(smoothAOPassSampler,coords).r,b);
+	        
+	       	
+	   	float3 surfaceHsl = RGBtoHSL(color);
+	   	surfaceHsl.y = 0.0;
+	   	surfaceHsl.z = 0.5;
+	   	float3 surface = b*0.5;
+	   	
+	   	float3 result = 0;
+	   	result = (
+				fLightMult*light*(color+fLightOffset)
+				+fSourceColor*color
+		   )/(0.9+fLightNormalize);
+		   
+			float correctedAo = pow(ao,fAOMultiplier*(depth<=fWeaponDepth ? 0.2 : 1.0));
+	    	if(bAOProtectLight) {
+	    		correctedAo = lb+correctedAo*(1.0-lb);
+	    	}
+	    	
+	   	result *= correctedAo;
+			
+	   	float preserveWhite = pow(b,fPreservePower);
+	   	float preserveDark = pow(1.0-b,fPreservePower);
+	   	float preserveUnsaturated = 0;//pow(1.0-colorHsl.y,fPreservePower);
+	   	float preserve = max(max(preserveUnsaturated,preserveWhite),preserveDark);
+	   	
+	   	
+	   	
+	   	outPixel = float4(saturate(preserve*color+(1.0-preserve)*result),1.0);
+       }
+       outDepth = float4(depth,0,0,1);
     }
     
     void PS_DisplayResult(in float4 position : SV_Position, in float2 coords : TEXCOORD, out float4 outPixel : SV_Target)
