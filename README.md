@@ -41,7 +41,7 @@ For example :
 
 
 ## DH_Uniformity_correction
-This shader tries to correct screen uniformity.
+This shader tries to correct screen uniformity and/or DSE (Dirty Screen Effect)
 
 ### HOW TO
 
@@ -70,5 +70,10 @@ Correction set to 0.25 :
 5. ????
 
 6. Profit !
+
+### Example on a TV subject to DSE
+![DSE_correction_OFF](screenshots/dh_uniformity_correction/DSE_paperben_uniformity-correction-off.jpg?raw=true "DSE_correction_OFF")
+![DSE_correction_ON](screenshots/dh_uniformity_correction/DSE_paperben_uniformity-correction-on.jpg?raw=true "DSE_correction_ON")
+Credits to *paperben*.
 
 
