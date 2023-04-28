@@ -1,6 +1,22 @@
 # dh-reshade-shaders
 Shaders for ReShade injector
 
+## DH_UBER_RT
+This shader is an All-in-one "Screen Space Ray Tracing" shader.
+It produce Global Illumination, Ambiant Occlusion and Reflections in a highly customizable little package.
+
+[Comparison](https://imgsli.com/MTc0MzY1)
+
+Global Illumination layer:
+![DH_UBER_RT_GI](screenshots/dh_uber_rt/1-dh_uber_rt-GI.jpg?raw=true "DH_UBER_RT GI")
+Ambiant Occlusion layer:
+![DH_UBER_RT_AO](screenshots/dh_uber_rt/2-dh_uber_rt-AO.jpg?raw=true "DH_UBER_RT AO")
+Reflection layer:
+![DH_UBER_RT_SSR](screenshots/dh_uber_rt/3-dh_uber_rt-SSR.jpg?raw=true "DH_UBER_RT SSR")
+Everything applied:
+![DH_UBER_RT_ON](screenshots/dh_uber_rt/4-dh_uber_rt-on.jpg?raw=true "DH_UBER_RT ON")
+
+
 ## DH_Lain
 This shader tries to reproduce the design of the shadows from the Anime "Serial Experiment Lain".
 
@@ -18,16 +34,10 @@ This shader can be used to create drawing/anime/manga effects :
 - saturation
 
 For example :
-### Skyrim - Original
-![Skyrim - Original](screenshots/dh_anime/TESV%202019-11-05%2013-54-50%20original.png?raw=true "Skyrim - Original")
-
-### Skyrim - DH_Anime
 ![Skyrim - DH_Anime](screenshots/dh_anime/TESV%202019-11-05%2013-54-50.png?raw=true "Skyrim - DH_Anime")
 ![Skyrim - DH_Anime](screenshots/dh_anime/TESV%202019-11-05%2013-55-17.png?raw=true "Skyrim - DH_Anime")
-![Skyrim - DH_Anime](screenshots/dh_anime/TESV%202019-11-05%2013-56-23.png?raw=true "Skyrim - DH_Anime")
 ![Skyrim - DH_Anime](screenshots/dh_anime/TESV%202019-11-05%2013-56-34.png?raw=true "Skyrim - DH_Anime")
 ![Skyrim - DH_Anime](screenshots/dh_anime/TESV%202019-11-05%2013-57-14.png?raw=true "Skyrim - DH_Anime")
-![Skyrim - DH_Anime](screenshots/dh_anime/TESV%202019-11-05%2013-57-31.png?raw=true "Skyrim - DH_Anime")
 
 
 ## DH_Undither
