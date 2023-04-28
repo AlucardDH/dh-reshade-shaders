@@ -1,8 +1,55 @@
+////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// DH_UBER_RT
+//
+// This shader is free, if you paid for it, you have been ripped and should ask for a refund.
+//
+// This shader is was developed by AlucardDH (Damien Hembert)
+//
+// Get more here : https://github.com/AlucardDH/dh-reshade-shaders
+//
+////////////////////////////////////////////////////////////////////////////////////////////////
 #include "Reshade.fxh"
 
+// VISIBLE PERFORMANCE SETTINGS /////////////////////////////////////////////////////////////////
+
+// Define the working resolution of the intermediate steps of the shader
+// Default is 0.5. 1.0 for full-res, 0.5 for quarter-res
+// It can go lower for a performance boost like 0.25 but the image will be more blurry and noisy
+// It can go higher (lile 2.0) if you have GPU to spare
 #ifndef DH_RENDER_SCALE
  #define DH_RENDER_SCALE 0.5
 #endif
+
+// HIDDEN PERFORMANCE SETTINGS /////////////////////////////////////////////////////////////////
+// Should not be modified but can help if you really want to squeeze some FPS at the cost of lower fidelity
+
+// Define if the ray tracing should stop when a surface is almost hit, and after how many retries
+// Default is 0 (no premature stop), 1 for 1 try, 2 for 2 tries... generaly, 8 is equivalent to 0
+#define OPTIMIZATION_CROSS_TESTS 0
+
+// Define is GI rays should be directed to the background:
+// it make the GI looks like light is targeting the camera but the gain is less noise
+// Default is 1 (slightly biaised), 0 is no biais
+#define OPTIMIZATION_BIAISED_RT 1
+
+// Define the maximum distance a ray can travel
+// Default is 1.0 : the full screen/depth, less (0.5) can be enough depending on the game
+#define OPTIMIZATION_RT_MAX_DISTANCE 1.0
+
+// Define is the motion detection is actived
+// Default is 1 (activated), can be deactivated,
+// if deactivated : lot of noise and blur when moving, less noise when static
+// This could make sence in game with a static camera (point & clicks for example)
+#define MOTION_DETECTION 1
+
+// Define is a light smoothing filter on Normal
+// Default is 1 (activated)
+#define NORMAL_FILTER 1
+
+
+// CONSTANTS /////////////////////////////////////////////////////////////////
+// Don't touch this
 
 #define DEBUG_OFF 0
 #define DEBUG_GI 1
@@ -19,14 +66,10 @@
 #define RT_HIT 1.0
 #define RT_MISSED 0.0
 
-#define OPTIMIZATION_CROSS_TESTS 0
-#define OPTIMIZATION_BIAISED_RT 1
-#define OPTIMIZATION_RT_MAX_DISTANCE 1.0
-
-#define NORMAL_FILTER 1
-
 #define PI 3.14159265359
 #define SQRT2 1.41421356237
+
+#define fRayHitDepthThreshold 0.350
 
 // Can be used to fix wrong screen resolution
 #define INPUT_WIDTH BUFFER_WIDTH
@@ -40,23 +83,28 @@
 #define BUFFER_SIZE int2(INPUT_WIDTH,INPUT_HEIGHT)
 #define BUFFER_SIZE3 int3(INPUT_WIDTH,INPUT_HEIGHT,INPUT_WIDTH*RESHADE_DEPTH_LINEARIZATION_FAR_PLANE*fDepthMultiplier/1024)
 
-#define fRayHitDepthThreshold 0.350
 
+// MACROS /////////////////////////////////////////////////////////////////
+// Don't touch this
 #define getNormal(c) (tex2Dlod(normalSampler,float4(c.xy,0,0)).xyz-0.5)*2
 #define getColor(c) tex2Dlod(ReShade::BackBuffer,float4(c,0,0))
 #define getColorSamplerLod(s,c,l) tex2Dlod(s,float4(c.xy,0,l))
 #define getColorSampler(s,c) tex2Dlod(s,float4(c.xy,0,0))
 
-#define diffT(v1,v2,t) !any(max(abs(v1-v2)-t,0))
+//////////////////////////////////////////////////////////////////////////////
+
+
+
 namespace DH_UBER_RT {
 
 // Textures
-    // Common textures
-    texture roughnessTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8; };
-    sampler roughnessSampler { Texture = roughnessTex; };
 
+    // Common textures
+
+#if MOTION_DETECTION
     texture motionTex { Width = RENDER_WIDTH; Height = RENDER_HEIGHT; Format = RGBA32F; };
     sampler motionSampler { Texture = motionTex; };
+#endif
     
     texture previousColorTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8; };
     sampler previousColorSampler { Texture = previousColorTex; };
@@ -94,6 +142,9 @@ namespace DH_UBER_RT {
     sampler aoAccuSampler { Texture = aoAccuTex; MinLOD = 0.0f; MaxLOD = 5.0f;};
 
     // SSR textures
+    texture roughnessTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8; };
+    sampler roughnessSampler { Texture = roughnessTex; };
+    
     texture ssrPassTex { Width = RENDER_WIDTH; Height = RENDER_HEIGHT; Format = RGBA8; MipLevels = 6; };
     sampler ssrPassSampler { Texture = ssrPassTex; MinLOD = 0.0f; MaxLOD = 5.0f; };
 
@@ -115,22 +166,8 @@ namespace DH_UBER_RT {
         ui_type = "combo";
         ui_label = "Display";
         ui_items = "Output\0GI\0AO\0SSR\0Roughness\0Depth\0Normal\0Sky\0Motion\0";
+        ui_tooltip = "Debug the intermediate steps of the shader";
     > = 0;
-
-    
-// MOTION
-    uniform bool bMotionDetection <
-        ui_type = "slider";
-        ui_category = "Motion detection";
-        ui_label = "Enable";
-    > = true;
-    uniform int iMotionRadius <
-        ui_type = "slider";
-        ui_category = "Motion detection";
-        ui_label = "Radius";
-        ui_min = 1; ui_max = 16;
-        ui_step = 1;
-    > = 6;
     
 // DEPTH
     uniform float fDepthMultiplier <
@@ -139,6 +176,8 @@ namespace DH_UBER_RT {
         ui_label = "Depth multiplier";
         ui_min = 0.1; ui_max = 10;
         ui_step = 0.1;
+        ui_tooltip = "Multiply the depth returned by the game\n"
+                    "Can help to make mutitple shaders work together";
     > = 1.0;
 
     uniform float fSkyDepth <
@@ -147,6 +186,7 @@ namespace DH_UBER_RT {
         ui_label = "Sky Depth";
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
+        ui_tooltip = "Define where the sky starts to prevent if to be affected by the shader";
     > = 0.99;
     
     uniform float fWeaponDepth <
@@ -155,9 +195,23 @@ namespace DH_UBER_RT {
         ui_label = "Weapon Depth ";
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.001;
+        ui_tooltip = "Define where the first person weapon ends";
     > = 0.001;
     
 // COMMMON RT
+// MOTION
+#if MOTION_DETECTION
+    uniform int iMotionRadius <
+        ui_type = "slider";
+        ui_category = "Common RT";
+        ui_label = "Motion detection Radius";
+        ui_min = 1; ui_max = 16;
+        ui_step = 1;
+        ui_tooltip = "Define the max distance of motion detection.\n"
+                    "Lower=better performance, more noise in motion\n"
+                    "Higher=better motion detection, less performance, can producte false detection\n"
+                    "/!\\ HAS A BIG INPACT ON PERFORMANCES";
+    > = 6;
 
     uniform int iFrameAccu <
         ui_type = "slider";
@@ -165,7 +219,36 @@ namespace DH_UBER_RT {
         ui_label = "Temporal accumulation";
         ui_min = 1; ui_max = 16;
         ui_step = 1;
+        ui_tooltip = "Define the number of accumulated frames over time.\n"
+                    "Lower=less ghosting in motion, more noise\n"
+                    "Higher=more ghosting in motion, less noise\n"
+                    "/!\\ If motion detection is disable, decrease this to 3 except if you have a very high fps";
     > = 8;
+#else
+    uniform int iFrameAccu <
+        ui_type = "slider";
+        ui_category = "Common RT";
+        ui_label = "Temporal accumulation";
+        ui_min = 1; ui_max = 8;
+        ui_step = 1;
+        ui_tooltip = "Define the number of accumulated frames over time.\n"
+                    "Lower=less ghosting in motion, more noise\n"
+                    "Higher=more ghosting in motion, less noise\n"
+                    "/!\\ If motion detection is disable, decrease this to 3 except if you have a very high fps";
+    > = 3;
+#endif
+    uniform float fRayStepPrecision <
+        ui_type = "slider";
+        ui_category = "Common RT";
+        ui_label = "Step Precision";
+        ui_min = 100.0; ui_max = 4000;
+        ui_step = 0.1;
+        ui_tooltip = "Define the length of the steps during ray tracing.\n"
+                    "Lower=better performance, less quality\n"
+                    "Higher=better detection of small geometry, less performances\n"
+                    "/!\\ HAS A VARIABLE INPACT ON PERFORMANCES\n"
+                    "DEPENDING ON 'Step multiply'";
+    > = 2000;
     
     uniform float fRayStepMultiply <
         ui_type = "slider";
@@ -173,18 +256,13 @@ namespace DH_UBER_RT {
         ui_label = "Step multiply";
         ui_min = 0.01; ui_max = 4.0;
         ui_step = 0.01;
+        ui_tooltip = "Define the factor of increase of each step of ray tracing.\n"
+                    "Lower=better detection of small geometry, better dectection of far geometry, less performances\n"
+                    "Higher=better performance, less quality\n"
+                    "/!\\ HAS A BIG INPACT ON PERFORMANCES";
     > = 1.3;
 
-
 // GI
-    
-    uniform float fRayStepPrecision <
-        ui_type = "slider";
-        ui_category = "GI";
-        ui_label = "Step Precision";
-        ui_min = 100.0; ui_max = 4000;
-        ui_step = 0.1;
-    > = 2000;
     
     uniform float fSkyColor <
         ui_type = "slider";
@@ -192,6 +270,7 @@ namespace DH_UBER_RT {
         ui_label = "Sky color";
         ui_min = 0; ui_max = 1.0;
         ui_step = 0.01;
+        ui_tooltip = "Define how much the sky can brighten the scene";
     > = 0.2;
     
     uniform float fGISaturationWeight <
@@ -200,13 +279,10 @@ namespace DH_UBER_RT {
         ui_label = "Saturation weight";
         ui_min = 0.0; ui_max = 20.0;
         ui_step = 0.01;
+        ui_tooltip = "Define how much saturated colors change the GI compared to whites/greys";
     > = 20.0;
 
-    // AO  
-    uniform bool bAONoTemporal<
-        ui_category = "AO";
-        ui_label = "No temporal accumulation";
-    > = false;
+    // AO
 
     uniform float fAOMultiplier <
         ui_type = "slider";
@@ -214,6 +290,7 @@ namespace DH_UBER_RT {
         ui_label = "Multiplier";
         ui_min = 0.0; ui_max = 5;
         ui_step = 0.01;
+        ui_tooltip = "Define the intensity of AO";
     > = 3.5;
     
     uniform float fAOPow <
@@ -222,6 +299,7 @@ namespace DH_UBER_RT {
         ui_label = "Pow";
         ui_min = 0.0; ui_max = 5;
         ui_step = 0.01;
+        ui_tooltip = "Define the intensity of the gradient of AO";
     > = 3.2;
     
     uniform int fAODistance <
@@ -230,6 +308,8 @@ namespace DH_UBER_RT {
         ui_label = "Distance";
         ui_min = 0; ui_max = 1000;
         ui_step = 0.1;
+        ui_tooltip = "Define the range of AO\n"
+                    "High values will make the scene darker";
     > = 150;
     
     uniform float fAOProtect <
@@ -238,6 +318,7 @@ namespace DH_UBER_RT {
         ui_label = "Light protection";
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
+        ui_tooltip = "Protection of bright areas to avoid washed out highlights";
     > = 0.9;
     
     uniform float fAODarkProtect <
@@ -246,6 +327,7 @@ namespace DH_UBER_RT {
         ui_label = "Dark protection";
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
+        ui_tooltip = "Protection of dark areas to avoid totally black and unplayable parts";
     > = 0.35;
     
 
@@ -255,13 +337,18 @@ namespace DH_UBER_RT {
         ui_type = "slider";
         ui_category = "SSR";
         ui_label = "Roughness";
+        ui_tooltip = "Tries to generate a roughness map of the image to have different type of reflections for SSR"
+                    "/!\\ HAS A VAIRABLE INPACT ON PERFORMANCES";
     > = true;
+
     uniform int iRoughnessRadius <
         ui_type = "slider";
         ui_category = "SSR";
         ui_label = "Roughness Radius";
         ui_min = 1; ui_max = 4;
         ui_step = 2;
+        ui_tooltip = "Define the max distance of roughness computation.\n"
+                    "/!\\ HAS A BIG INPACT ON PERFORMANCES";
     > = 1;
     uniform float fRoughnessIntensity <
         ui_type = "slider";
@@ -269,6 +356,7 @@ namespace DH_UBER_RT {
         ui_label = "Roughness Intensity";
         ui_min = 0; ui_max = 1.0;
         ui_step = 0.01;
+        ui_tooltip = "Define the way reflections are blurred by rough surfaces";
     > = 0.5;
 
 
@@ -279,6 +367,9 @@ namespace DH_UBER_RT {
         ui_label = "Radius";
         ui_min = 1; ui_max = 8;
         ui_step = 1;
+        ui_tooltip = "Define the max distance of smoothing.\n"
+                    "Higher:less noise, less performances\n"
+                    "/!\\ HAS A BIG INPACT ON PERFORMANCES";
     > = 2;
     
     uniform int iSmoothStep <
@@ -287,6 +378,9 @@ namespace DH_UBER_RT {
         ui_label = "Step";
         ui_min = 1; ui_max = 8;
         ui_step = 1;
+        ui_tooltip = "Compromise smoothing by skipping pixels in the smoothing and using lower quality LOD.\n"
+                    "Higher:less noise, can smooth surfaces that should not be mixed\n"
+                    "This has no impact on performances :)";
     > = 4;
     
     uniform int iSmoothSSRStep <
@@ -295,6 +389,9 @@ namespace DH_UBER_RT {
         ui_label = "SSR Step";
         ui_min = 1; ui_max = 8;
         ui_step = 1;
+        ui_tooltip = "Same as 'Step' but for SSR\n"
+                    "Higher:less noise, can smooth surfaces that should not be mixed\n"
+                    "This has no impact on performances :)";
     > = 2;
     
     uniform float fSmoothDistPow <
@@ -303,6 +400,7 @@ namespace DH_UBER_RT {
         ui_label = "Distance Weight";
         ui_min = 0.001; ui_max = 8.00;
         ui_step = 0.001;
+        ui_tooltip = "During denoising, give more importance to close of far pixels";
     > = 3.0;
 
     uniform float fNormalWeight <
@@ -311,6 +409,9 @@ namespace DH_UBER_RT {
         ui_label = "Normal weight";
         ui_min = 0; ui_max = 1.0;
         ui_step = 0.01;
+        ui_tooltip = "During denoising, give more importance to pixels in the same orientation\n"
+                    "Higher will make GI less blurry\n"
+                    "Lower will make curved geometry smoother";
     > = 0.95;
     
     // Merging
@@ -321,6 +422,7 @@ namespace DH_UBER_RT {
         ui_label = "Distance fading";
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
+        ui_tooltip = "Distance from where the effect is less applied.";
     > = 0.75;
     
     uniform float fBaseColor <
@@ -329,6 +431,7 @@ namespace DH_UBER_RT {
         ui_label = "Base color brightness";
         ui_min = 0.0; ui_max = 2.0;
         ui_step = 0.01;
+        ui_tooltip = "Simple multiplier for the base image.";
     > = 1.0;
         
     uniform float fGILightMerging <
@@ -337,6 +440,7 @@ namespace DH_UBER_RT {
         ui_label = "GI Light";
         ui_min = 0.01; ui_max = 10.0;
         ui_step = 0.01;
+        ui_tooltip = "Define how much bright areas are affected by GI.";
     > = 2.5;
     uniform float fGIDarkMerging <
         ui_type = "slider";
@@ -344,6 +448,7 @@ namespace DH_UBER_RT {
         ui_label = "GI Dark";
         ui_min = 0.01; ui_max = 10.0;
         ui_step = 0.01;
+        ui_tooltip = "Define how much dark areas are affected by GI.";
     > = 2.5;
     
     uniform float fGIFinalMerging <
@@ -352,6 +457,7 @@ namespace DH_UBER_RT {
         ui_label = "GI Final merging";
         ui_min = 0; ui_max = 1.0;
         ui_step = 0.01;
+        ui_tooltip = "Define how much the whole image is affected by GI.";
     > = 0.5;
     
     uniform float fMergingSSR <
@@ -360,6 +466,7 @@ namespace DH_UBER_RT {
         ui_label = "SSR";
         ui_min = 0; ui_max = 1.0;
         ui_step = 0.001;
+        ui_tooltip = "Define this intensity of the Screan Space Reflection.";
     > = 0.5;
     
     uniform float fMergingRoughness <
@@ -368,6 +475,7 @@ namespace DH_UBER_RT {
         ui_label = "SSR Roughness";
         ui_min = 0.001; ui_max = 10.0;
         ui_step = 0.001;
+        ui_tooltip = "Define how much the roughness decrease reflection intensity";
     > = 2.5;
 
 // FUCNTIONS
@@ -550,73 +658,71 @@ namespace DH_UBER_RT {
         return saturate(dist);            
     }
 
+#if MOTION_DETECTION
     void PS_MotionPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outMotion : SV_Target0) {
-        if(bMotionDetection) {
-            float3 refColor = getColor(coords).rgb;
-            float3 refAltColor = getColor(coords-ReShade::PixelSize).rgb;
-            float refDepth = ReShade::GetLinearizedDepth(coords);;
-            
-            float bestDist = 1000.0;
-            float2 bestMotion = coords;
-            int2 delta = 0;
-            int deltaStep = 8;
-            
-            float2 currentCoords = coords;
-            float dist = motionDistance(refColor,refAltColor,refDepth,coords);
-                    
-            bestDist = dist;
-            bestMotion = currentCoords;
-            
-            [loop]     
-            for(int radius=1;radius<=iMotionRadius;radius++) {
-                [loop]
-                for(int dx=0;dx<=radius;dx++) {
-                    
-                   delta.x = dx;
-                    delta.y = radius-dx;
-                    
-                    currentCoords = coords+ReShade::PixelSize*delta*deltaStep;
-                    dist = motionDistance(refColor,refAltColor,refDepth,currentCoords);
-                    if(dist<bestDist) {
-                        bestDist = dist;
-                        bestMotion = currentCoords;
-                    }
-                    
-                    delta.x = -dx;
-                    
-                    currentCoords = coords+ReShade::PixelSize*delta*deltaStep;
-                    dist = motionDistance(refColor,refAltColor,refDepth,currentCoords);
-                    if(dist<bestDist) {
-                        bestDist = dist;
-                        bestMotion = currentCoords;
-                    }
-                    
-                    delta.x = dx;
-                    delta.y = -(radius-dx);
-                    
-                    currentCoords = coords+ReShade::PixelSize*delta*deltaStep;
-                    dist = motionDistance(refColor,refAltColor,refDepth,currentCoords);
-                    if(dist<bestDist) {
-                        bestDist = dist;
-                        bestMotion = currentCoords;
-                    }
-                    
-                    delta.x = -dx;
-                    
-                    currentCoords = coords+ReShade::PixelSize*delta*deltaStep;
-                    dist = motionDistance(refColor,refAltColor,refDepth,currentCoords);
-                    if(dist<bestDist) {
-                        bestDist = dist;
-                        bestMotion = currentCoords;
-                    }
+        float3 refColor = getColor(coords).rgb;
+        float3 refAltColor = getColor(coords-ReShade::PixelSize).rgb;
+        float refDepth = ReShade::GetLinearizedDepth(coords);;
+        
+        float bestDist = 1000.0;
+        float2 bestMotion = coords;
+        int2 delta = 0;
+        int deltaStep = 8;
+        
+        float2 currentCoords = coords;
+        float dist = motionDistance(refColor,refAltColor,refDepth,coords);
+                
+        bestDist = dist;
+        bestMotion = currentCoords;
+        
+        [loop]     
+        for(int radius=1;radius<=iMotionRadius;radius++) {
+            [loop]
+            for(int dx=0;dx<=radius;dx++) {
+                
+               delta.x = dx;
+                delta.y = radius-dx;
+                
+                currentCoords = coords+ReShade::PixelSize*delta*deltaStep;
+                dist = motionDistance(refColor,refAltColor,refDepth,currentCoords);
+                if(dist<bestDist) {
+                    bestDist = dist;
+                    bestMotion = currentCoords;
+                }
+                
+                delta.x = -dx;
+                
+                currentCoords = coords+ReShade::PixelSize*delta*deltaStep;
+                dist = motionDistance(refColor,refAltColor,refDepth,currentCoords);
+                if(dist<bestDist) {
+                    bestDist = dist;
+                    bestMotion = currentCoords;
+                }
+                
+                delta.x = dx;
+                delta.y = -(radius-dx);
+                
+                currentCoords = coords+ReShade::PixelSize*delta*deltaStep;
+                dist = motionDistance(refColor,refAltColor,refDepth,currentCoords);
+                if(dist<bestDist) {
+                    bestDist = dist;
+                    bestMotion = currentCoords;
+                }
+                
+                delta.x = -dx;
+                
+                currentCoords = coords+ReShade::PixelSize*delta*deltaStep;
+                dist = motionDistance(refColor,refAltColor,refDepth,currentCoords);
+                if(dist<bestDist) {
+                    bestDist = dist;
+                    bestMotion = currentCoords;
                 }
             }
-            outMotion = float4(bestMotion,bestDist,1.0);
-            
-        } else {
-            outMotion = float4(coords,0.0,1.0);
         }
+        outMotion = float4(bestMotion,bestDist,1.0);
     }
+#endif    
+    
 
 
     void PS_RoughnessDepthPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outRoughness : SV_Target0, out float4 outDepth : SV_Target1) {
@@ -879,7 +985,12 @@ namespace DH_UBER_RT {
         
         float d = distance(hitPosition.xyz,refWp);
         float3 giColor = 0;
-        float3 previousCoords = bMotionDetection ? getColorSampler(motionSampler,coords).xyz : float3(coords,1.0);
+#if MOTION_DETECTION
+        float3 previousCoords = getColorSampler(motionSampler,coords).xyz;
+#else
+        float3 previousCoords = float3(coords,1.0);
+#endif
+
         float3 previousGI = getColorSampler(giAccuSampler,previousCoords.xy).rgb;
         
         if(hitPosition.a==RT_HIT || hitPosition.a==RT_MISSED_CROSSED) {
@@ -892,32 +1003,32 @@ namespace DH_UBER_RT {
         }
         
         
-        float aoOpacity = bAONoTemporal? 1.0 : 1.0/iFrameAccu;
+        float aoOpacity = 1.0/iFrameAccu;
         
-        if(bMotionDetection) {
-            giColor = max(giColor,previousGI-0.001);
-        } else {
-            giColor = max(giColor,previousGI*(1.0-aoOpacity));
-        }
+#if MOTION_DETECTION
+        giColor = max(giColor,previousGI-0.001);
+#else
+        giColor = max(giColor,previousGI*(1.0-aoOpacity));
+#endif
         
         outGI = float4(giColor,1.0);
 
         float ao = d>fAODistance ? 1.0 : 1.0-pow(1.0-d/fAODistance,fAOPow);
         
-        if(bMotionDetection) {
-            float previousAo = getColorSampler(aoSmoothPassSampler,previousCoords.xy).x;
-            if(isWeapon && hitPosition.a<RT_MISSED_CROSSED) {
-                outAO = float4(1,0,0,aoOpacity);
-            } else {
-                outAO = float4(ao*aoOpacity+(1.0-aoOpacity)*previousAo,0,0,1.0);
-            }
+#if MOTION_DETECTION
+        float previousAo = getColorSampler(aoSmoothPassSampler,previousCoords.xy).x;
+        if(isWeapon && hitPosition.a<RT_MISSED_CROSSED) {
+            outAO = float4(1,0,0,aoOpacity);
         } else {
-            if(hitPosition.a>=RT_MISSED_CROSSED) {
-                outAO = float4(ao,0,0,aoOpacity);
-            } else {
-                outAO = float4(1,0,0,aoOpacity);
-            }
+            outAO = float4(ao*aoOpacity+(1.0-aoOpacity)*previousAo,0,0,1.0);
         }
+#else
+        if(hitPosition.a>=RT_MISSED_CROSSED) {
+            outAO = float4(ao,0,0,aoOpacity);
+        } else {
+            outAO = float4(1,0,0,aoOpacity);
+        }
+#endif
         
     }
 
@@ -954,26 +1065,30 @@ namespace DH_UBER_RT {
             lightVector = normalize(lightVector);
             
             float4 hitPosition = trace(targetWp,lightVector,depth,true);
-            float3 previousCoords = bMotionDetection ? getColorSampler(motionSampler,coords).xyz : float3(coords,1.0);
+#if MOTION_DETECTION
+            float3 previousCoords = getColorSampler(motionSampler,coords).xyz;
+#else
+            float3 previousCoords = float3(coords,1.0);
+#endif
             float3 previousSSR = getColorSampler(ssrAccuSampler,previousCoords).rgb;
                     
             if(hitPosition.a==RT_MISSED) {
                 // no hit
-                if(bMotionDetection) {
-                    outColor = float4(previousSSR,1);
-                } else {
-                    outColor = float4(0,0,0,1);
-                }
+#if MOTION_DETECTION
+                outColor = float4(previousSSR,1);
+#else
+                outColor = float4(0,0,0,1);
+#endif
                 
             } else {
                 float3 screenCoords = getScreenPosition(hitPosition.xyz);
                 float3 color = getColor(screenCoords.xy).rgb;
                 float angle = max(0.25,1.0-dot(normal,normalize(float3(coords-0.5,1))));
                 color*=angle;
-                if(bMotionDetection){
-                    color = color*opacity+previousSSR*(1.0-opacity);
-                    opacity = 1.0;
-                } 
+#if MOTION_DETECTION
+                color = color*opacity+previousSSR*(1.0-opacity);
+                opacity = 1.0;
+#endif
                 outColor = float4(color,opacity);
             }
         }
@@ -999,9 +1114,6 @@ namespace DH_UBER_RT {
        
         float opacity = 1.0/iFrameAccu;
         float aoOpacity = opacity;
-        if(bAONoTemporal) {
-            aoOpacity = 1.0;
-        }
         
         opacity *= 0.5+refBrightness*0.5;
         //aoOpacity *= 0.5+refBrightness*0.5;
@@ -1009,7 +1121,11 @@ namespace DH_UBER_RT {
         float refAo = getColorSampler(sourceAOSampler,coords).r;
         
         if(iSmoothRadius==0) {
-            float3 previousCoords = bMotionDetection ? getColorSampler(motionSampler,coords).xyz : float3(coords,1.0);
+#if MOTION_DETECTION
+            float3 previousCoords = getColorSampler(motionSampler,coords).xyz;
+#else
+            float3 previousCoords = float3(coords,1.0);
+#endif
             float3 previousGI = getColorSampler(giAccuSampler,previousCoords.xy).rgb;
             float3 previousAO = getColorSampler(aoAccuSampler,previousCoords.xy).rgb;
             float3 previousSSR = getColorSampler(ssrAccuSampler,previousCoords.xy).rgb;
@@ -1124,20 +1240,20 @@ namespace DH_UBER_RT {
         ao /= aoWeightSum;
         ssr /= ssrWeightSum;
         
-        if(bMotionDetection && passNumber==1) {
+#if MOTION_DETECTION
+        if(passNumber==1) {
             float3 previousCoords = getColorSampler(motionSampler,coords).xyz;
             float3 previousGi = getColorSampler(giAccuSampler,previousCoords.xy).rgb;
             
             outGI = float4(gi*opacity+previousGi*(1.0-opacity),1.0);
-            outAO = float4(ao,ao,ao,1.0);
-        } else if(bMotionDetection && passNumber==2) {
-            outGI = float4(gi,1.0);            
-            outAO = float4(ao,ao,ao,1.0);
         } else {
-            outGI = float4(gi,opacity);
-            outAO = float4(ao,ao,ao,aoOpacity);
-            
+            outGI = float4(gi,1.0);
         }
+        outAO = float4(ao,ao,ao,1.0);
+#else
+        outGI = float4(gi,opacity);
+        outAO = float4(ao,ao,ao,aoOpacity);
+#endif
         outSSR = float4(ssr,1);
         
 
@@ -1152,6 +1268,7 @@ namespace DH_UBER_RT {
     }
     
     float computeColorPreservationGI(float colorBrightness, float giBrightness) {
+        return 1.0;
     }
     
     float computeColorPreservationAO(float colorBrightness, float giBrightness) {
@@ -1310,11 +1427,11 @@ namespace DH_UBER_RT {
             result = depth>fSkyDepth?1.0:0.0;
             
         } else if(iDebug==DEBUG_MOTION) {
+#if MOTION_DETECTION
             float3  motion = getColorSampler(motionSampler,coords).rgb;
-
-
-            motion.xy = (motion.xy-coords)*10;            
+            motion.xy = (motion.xy-coords)*10;
             result = motion;
+#endif         
         }
         
         outPixel = float4(result,1.0);
@@ -1332,11 +1449,13 @@ namespace DH_UBER_RT {
             RenderTarget = roughnessTex;
             RenderTarget1 = depthTex;
         }
+#if MOTION_DETECTION
         pass {
             VertexShader = PostProcessVS;
             PixelShader = PS_MotionPass;
             RenderTarget = motionTex;
         }
+#endif
         pass {
             VertexShader = PostProcessVS;
             PixelShader = PS_NormalPass;
