@@ -31,7 +31,7 @@
 // Define is GI rays should be directed to the background:
 // it make the GI looks like light is targeting the camera but the gain is less noise
 // Default is 1 (slightly biaised), 0 is no biais
-#define OPTIMIZATION_BIAISED_RT 1
+#define OPTIMIZATION_BIAISED_RT 0
 
 // Define the maximum distance a ray can travel
 // Default is 1.0 : the full screen/depth, less (0.5) can be enough depending on the game
@@ -108,10 +108,12 @@ namespace DH_UBER_RT {
     
     texture previousColorTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8; };
     sampler previousColorSampler { Texture = previousColorTex; };
-
+    
+#if __RENDERER__ != 0x9000
     texture depthTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = R32F; };
     sampler depthSampler { Texture = depthTex; };
-    
+#endif
+
     texture previousDepthTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = R32F; };
     sampler previousDepthSampler { Texture = previousDepthTex; };
 
@@ -142,8 +144,10 @@ namespace DH_UBER_RT {
     sampler aoAccuSampler { Texture = aoAccuTex; MinLOD = 0.0f; MaxLOD = 5.0f;};
 
     // SSR textures
+#if __RENDERER__ != 0x9000
     texture roughnessTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8; };
     sampler roughnessSampler { Texture = roughnessTex; };
+#endif
     
     texture ssrPassTex { Width = RENDER_WIDTH; Height = RENDER_HEIGHT; Format = RGBA8; MipLevels = 6; };
     sampler ssrPassSampler { Texture = ssrPassTex; MinLOD = 0.0f; MaxLOD = 5.0f; };
@@ -333,6 +337,8 @@ namespace DH_UBER_RT {
 
 
     // SSR
+
+#if __RENDERER__ != 0x9000
     uniform bool bRoughness <
         ui_type = "slider";
         ui_category = "SSR";
@@ -358,7 +364,7 @@ namespace DH_UBER_RT {
         ui_step = 0.01;
         ui_tooltip = "Define the way reflections are blurred by rough surfaces";
     > = 0.5;
-
+#endif
 
     // Denoising
     uniform int iSmoothRadius <
@@ -468,7 +474,8 @@ namespace DH_UBER_RT {
         ui_step = 0.001;
         ui_tooltip = "Define this intensity of the Screan Space Reflection.";
     > = 0.5;
-    
+
+#if __RENDERER__ != 0x9000
     uniform float fMergingRoughness <
         ui_type = "slider";
         ui_category = "Merging";
@@ -477,6 +484,7 @@ namespace DH_UBER_RT {
         ui_step = 0.001;
         ui_tooltip = "Define how much the roughness decrease reflection intensity";
     > = 2.5;
+#endif
 
 // FUCNTIONS
 // Color spaces
@@ -544,7 +552,11 @@ namespace DH_UBER_RT {
     }
 
     float getDepth(float2 coords) {
+#if __RENDERER__ == 0x9000
+        return ReShade::GetLinearizedDepth(coords);
+#else
         return getColorSampler(depthSampler,coords).x;
+#endif
     }
     
     float getPreviousDepth(float2 coords) {
@@ -581,9 +593,12 @@ namespace DH_UBER_RT {
         return  normalize(cross(posCenter - posNorth, posCenter - posEast));
     }
 
+
+#if __RENDERER__ != 0x9000
     float getRoughness(float2 coords) {
         return abs(getColorSampler(roughnessSampler,coords).r-0.5)*2;
     }
+#endif
 
 
 // Vector operations
@@ -641,7 +656,7 @@ namespace DH_UBER_RT {
     }
 
 // PS
-    
+#if MOTION_DETECTION
     float motionDistance(float3 refColor,float3 refAltColor,float refDepth, float2 currentCoords) {
         float currentDepth = getPreviousDepth(currentCoords);
         
@@ -658,7 +673,7 @@ namespace DH_UBER_RT {
         return saturate(dist);            
     }
 
-#if MOTION_DETECTION
+
     void PS_MotionPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outMotion : SV_Target0) {
         float3 refColor = getColor(coords).rgb;
         float3 refAltColor = getColor(coords-ReShade::PixelSize).rgb;
@@ -724,10 +739,11 @@ namespace DH_UBER_RT {
 #endif    
     
 
-
+#if __RENDERER__ != 0x9000
     void PS_RoughnessDepthPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outRoughness : SV_Target0, out float4 outDepth : SV_Target1) {
         float depth = ReShade::GetLinearizedDepth(coords);
         float3 refColor = getColor(coords).rgb;
+
 
         if(!bRoughness) {
             outRoughness = float4(0.5,0.5,0.5,1.0);
@@ -784,6 +800,7 @@ namespace DH_UBER_RT {
             outDepth = float4(depth,depth,depth,1.0);
         }
     }
+#endif
 
     void PS_NormalPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outNormal : SV_Target0) {
         
@@ -1013,14 +1030,15 @@ namespace DH_UBER_RT {
         
         outGI = float4(giColor,1.0);
 
-        float ao = d>fAODistance ? 1.0 : 1.0-pow(1.0-d/fAODistance,fAOPow);
+        float ao = d>fAODistance ? 1.0 : 1.0-pow(saturate(1.0-d/fAODistance),abs(fAOPow));
         
 #if MOTION_DETECTION
         float previousAo = getColorSampler(aoSmoothPassSampler,previousCoords.xy).x;
         if(isWeapon && hitPosition.a<RT_MISSED_CROSSED) {
             outAO = float4(1,0,0,aoOpacity);
         } else {
-            outAO = float4(ao*aoOpacity+(1.0-aoOpacity)*previousAo,0,0,1.0);
+            float resultAo = lerp(ao,previousAo,1.0-aoOpacity);
+            outAO = float4(resultAo,0.0,0.0,1.0);
         }
 #else
         if(hitPosition.a>=RT_MISSED_CROSSED) {
@@ -1053,7 +1071,7 @@ namespace DH_UBER_RT {
             
             float3 normal = getNormal(coords);
             
-            
+#if __RENDERER__ != 0x9000
             if(bRoughness) {
                 float roughness = getRoughness(coords);
                 float randomness = roughness*1000*fRoughnessIntensity;
@@ -1062,6 +1080,7 @@ namespace DH_UBER_RT {
                 
                 lightVector += randomVector*randomness;
             }
+#endif
             lightVector = normalize(lightVector);
             
             float4 hitPosition = trace(targetWp,lightVector,depth,true);
@@ -1188,7 +1207,7 @@ namespace DH_UBER_RT {
                     float giWeight = color.a;                       
                     
                     // Distance weight;
-                    float distWeight = abs(pow(1.0+iSmoothRadius/(dist+1),fSmoothDistPow));
+                    float distWeight = pow(abs(1.0+iSmoothRadius/(dist+1)),fSmoothDistPow);
                     
                     giWeight *= distWeight;
                     aoWeight *= distWeight;
@@ -1278,7 +1297,7 @@ namespace DH_UBER_RT {
     
     float computeAo(float2 coords,float colorBrightness, float giBrightness) {
         float ao = getColorSampler(aoAccuSampler,coords).x;
-        ao = pow(ao,fAOMultiplier);
+        ao = pow(abs(ao),fAOMultiplier);
         ao = ao*(1.0-fAOProtect)+fAOProtect*(1.0-(1.0-ao)*(1.0-max(colorBrightness,giBrightness)));
         ao = ao*(1.0-fAODarkProtect)+fAODarkProtect*(1.0-(1.0-ao)*(min(colorBrightness,giBrightness)));
         return ao;
@@ -1294,7 +1313,12 @@ namespace DH_UBER_RT {
         float colorPreservation = computeColorPreservationSSR(colorHsl);
             
         float3 ssr = getColorSampler(ssrAccuSampler,coords).rgb;
+#if __RENDERER__ != 0x9000
         float roughness = getRoughness(coords);
+#else
+        float roughness = 0;
+        float fMergingRoughness = 0.001;
+#endif
         
         float3 fixedDarkHsl = colorHsl;
         fixedDarkHsl.z = 1.0-pow(1.0-colorHsl.z,fMergingRoughness);
@@ -1414,8 +1438,9 @@ namespace DH_UBER_RT {
             result = computeSSR(coords,colorHsl)*1.5;
             
         } else if(iDebug==DEBUG_ROUGHNESS) {
+#if __RENDERER__ != 0x9000
             result = getColorSampler(roughnessSampler,coords).rgb;
-            
+#endif
         } else if(iDebug==DEBUG_DEPTH) {
             result = getDepth(coords);
             
@@ -1423,7 +1448,7 @@ namespace DH_UBER_RT {
             result = getColorSampler(normalSampler,coords).rgb;
             
         } else if(iDebug==DEBUG_SKY) {
-            float depth = getColorSampler(depthSampler,coords).r;
+            float depth = getDepth(coords).r;
             result = depth>fSkyDepth?1.0:0.0;
             
         } else if(iDebug==DEBUG_MOTION) {
@@ -1436,12 +1461,12 @@ namespace DH_UBER_RT {
         
         outPixel = float4(result,1.0);
     }
-    
 
 
 // TEHCNIQUES 
     
     technique DH_UBER_RT {
+#if __RENDERER__ != 0x9000
         // Normal Roughness
         pass {
             VertexShader = PostProcessVS;
@@ -1449,6 +1474,7 @@ namespace DH_UBER_RT {
             RenderTarget = roughnessTex;
             RenderTarget1 = depthTex;
         }
+#endif
 #if MOTION_DETECTION
         pass {
             VertexShader = PostProcessVS;
