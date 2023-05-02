@@ -105,6 +105,11 @@ namespace DH_UBER_RT {
 
     // Common textures
 
+#if __RENDERER__ == 0x9000
+    texture blueNoiseTex < source ="dh_rt_noise.png" ; > { Width = 512; Height = 512; MipLevels = 1; Format = RGBA8; };
+    sampler blueNoiseSampler { Texture = blueNoiseTex;  AddressU = REPEAT;  AddressV = REPEAT;  AddressW = REPEAT;};
+#endif
+
 #if MOTION_DETECTION
     texture motionTex { Width = RENDER_WIDTH; Height = RENDER_HEIGHT; Format = RGBA32F; };
     sampler motionSampler { Texture = motionTex; };
@@ -131,16 +136,6 @@ namespace DH_UBER_RT {
     
     texture giAccuTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8; };
     sampler giAccuSampler { Texture = giAccuTex; };
-    
-    // AO textures
-    texture aoPassTex { Width = RENDER_WIDTH; Height = RENDER_HEIGHT; Format = RGBA8; MipLevels = 6; };
-    sampler aoPassSampler { Texture = aoPassTex; MinLOD = 0.0f; MaxLOD = 5.0f;};
-
-    texture aoSmoothPassTex { Width = RENDER_WIDTH; Height = RENDER_HEIGHT; Format = RGBA8; MipLevels = 6; };
-    sampler aoSmoothPassSampler { Texture = aoSmoothPassTex; MinLOD = 0.0f; MaxLOD = 5.0f; };
-
-    texture aoAccuTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8; MipLevels = 6; };
-    sampler aoAccuSampler { Texture = aoAccuTex; MinLOD = 0.0f; MaxLOD = 5.0f;};
 
     // SSR textures
 #if ROUGHNESS
@@ -266,6 +261,15 @@ namespace DH_UBER_RT {
     > = 1.3;
 
 // GI
+
+    uniform float fGIDistancePower <
+        ui_type = "slider";
+        ui_category = "GI";
+        ui_label = "Distance power";
+        ui_min = 0; ui_max = 4.0;
+        ui_step = 0.01;
+        ui_tooltip = "Define how much the light intensity decrease";
+    > = 2.0;
     
     uniform float fSkyColor <
         ui_type = "slider";
@@ -605,14 +609,14 @@ namespace DH_UBER_RT {
         seed = seed * 747796405 + 2891336453;
         uint result = 0;
         
-    #if __RENDERER__ == 0x9000
+#if __RENDERER__ == 0x9000
         result = seed*random;
         return saturate(result/4294967295.0)/PI;
-    #else
+#else
         result = ((seed>>((seed>>28)+4))^seed)*277803737;
         result = (result>>22)^result;
         return result/4294967295.0;
-    #endif
+#endif
     }
 
     float randomNormalDistribution(inout uint seed) {
@@ -622,12 +626,18 @@ namespace DH_UBER_RT {
     }
 
     float3 randomHemispehreVector(float2 coords) {
+#if __RENDERER__ == 0x9000
+        int2 offset = int2((framecount*random*SQRT2),(framecount*random*PI))%512;
+        float3 jitter = normalize(tex2D(blueNoiseSampler,((offset+coords*BUFFER_SIZE)%512)/512).rgb-0.5-float3(0.25,0,0));
+        return normalize(jitter);
+#else
         uint seed = getPixelIndex(coords,RENDER_SIZE);
         float3 v = 0;
         v.x = randomNormalDistribution(seed);
         v.y = randomNormalDistribution(seed);
         v.z = randomNormalDistribution(seed);
         return normalize(v) ;
+#endif
     }
 
     float maxOf3(float3 a) {
@@ -949,18 +959,11 @@ namespace DH_UBER_RT {
 
 // GI
 
-    void PS_GILightPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outGI : SV_Target0, out float4 outAO : SV_Target1) {
-        
-        if(fGILightMerging==0.0 && fGILightMerging==0.0) {
-            outGI = float4(0,0,0,1); 
-            outAO = float4(1,0,0,1);
-            return;
-        }
+    void PS_GILightPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outGI : SV_Target0) {
         
         float depth = ReShade::GetLinearizedDepth(coords);
         if(depth>fSkyDepth) {
-            outGI = getColor(coords);   
-            outAO = float4(1,0,0,1);
+            outGI = float4(getColor(coords).rgb,1.0);
             return;
         }
         
@@ -986,13 +989,17 @@ namespace DH_UBER_RT {
         
         float d = distance(hitPosition.xyz,refWp);
         float3 giColor = 0;
+        
+        float3 previousCoords;
 #if MOTION_DETECTION
-        float3 previousCoords = getColorSampler(motionSampler,coords).xyz;
+        previousCoords = getColorSampler(motionSampler,coords).xyz;
 #else
-        float3 previousCoords = float3(coords,1.0);
+        previousCoords = float3(coords,1.0);
 #endif
 
-        float3 previousGI = getColorSampler(giAccuSampler,previousCoords.xy).rgb;
+        float4 previousFrame = getColorSampler(giAccuSampler,previousCoords.xy);
+        float3 previousGI = previousFrame.rgb;
+        float previousAO = previousFrame.a;
         
         if(hitPosition.a==RT_HIT || hitPosition.a==RT_MISSED_CROSSED) {
             giColor = getColor(screenCoords.xy).rgb;
@@ -1003,35 +1010,27 @@ namespace DH_UBER_RT {
             d *= 2.0;
         }
         
+        giColor *= pow(abs(1.0-d/RESHADE_DEPTH_LINEARIZATION_FAR_PLANE),fGIDistancePower);
         
-        float aoOpacity = 1.0/iFrameAccu;
+        float opacity = 1.0/iFrameAccu;
         
 #if MOTION_DETECTION
         giColor = max(giColor,previousGI-0.001);
 #else
-        giColor = max(giColor,previousGI*(1.0-aoOpacity));
+        giColor = max(giColor,previousGI*(1.0-opacity));
 #endif
         
-        outGI = float4(giColor,1.0);
-
+        
+        
         float ao = d>fAODistance ? 1.0 : 1.0-pow(saturate(1.0-d/fAODistance),abs(fAOPow));
         
-#if MOTION_DETECTION
-        float previousAo = getColorSampler(aoSmoothPassSampler,previousCoords.xy).x;
         if(isWeapon && hitPosition.a<RT_MISSED_CROSSED) {
-            outAO = float4(1,0,0,aoOpacity);
+            ao = 1.0;
         } else {
-            float resultAo = lerp(ao,previousAo,1.0-aoOpacity);
-            outAO = float4(resultAo,0.0,0.0,1.0);
+            ao = lerp(ao,previousAO,1.0-opacity);
         }
-#else
-        if(hitPosition.a>=RT_MISSED_CROSSED) {
-            outAO = float4(ao,0,0,aoOpacity);
-        } else {
-            outAO = float4(1,0,0,aoOpacity);
-        }
-#endif
-        
+
+        outGI = float4(giColor,ao);        
     }
 
 // SSR
@@ -1100,44 +1099,44 @@ namespace DH_UBER_RT {
     void smooth(
         int passNumber,
         sampler sourceGISampler,
-        sampler sourceAOSampler,
         sampler sourceSSRSampler,
-        float2 coords, out float4 outGI, out float4 outAO, out float4 outSSR,bool firstPass) {
+        float2 coords, out float4 outGI, out float4 outSSR,bool firstPass) {
         
         float refDepth = ReShade::GetLinearizedDepth(coords);
         if(refDepth>fSkyDepth) {
             outGI = float4(getColor(coords).rgb,1.0);
-            outAO = 1.0;
             outSSR = float4(0,0,0,1);
             return;
         }
         
-        float3 refGI = getColorSampler(sourceGISampler,coords).rgb;
-        float refBrightness = getBrightness(refGI);
-       
+        float4 refPass = getColorSampler(sourceGISampler,coords);
+        float3 refGI = refPass.rgb;
+        float refBrightness = getBrightness(refPass.rgb);
+        float refAo = refPass.a;
+        
         float opacity = 1.0/iFrameAccu;
         float aoOpacity = opacity;
         
         opacity *= 0.5+refBrightness*0.5;
-        //aoOpacity *= 0.5+refBrightness*0.5;
         
-        float refAo = getColorSampler(sourceAOSampler,coords).r;
+        float3 previousCoords;
+#if MOTION_DETECTION
+        previousCoords = getColorSampler(motionSampler,coords).xyz;
+#else
+        previousCoords = float3(coords,1.0);
+#endif
+        
+        float4 previousPass = getColorSampler(giAccuSampler,previousCoords.xy);
+        float3 previousGI = previousPass.rgb;
+        float previousAO = previousPass.a;
         
         if(iSmoothRadius==0) {
-#if MOTION_DETECTION
-            float3 previousCoords = getColorSampler(motionSampler,coords).xyz;
-#else
-            float3 previousCoords = float3(coords,1.0);
-#endif
-            float3 previousGI = getColorSampler(giAccuSampler,previousCoords.xy).rgb;
-            float3 previousAO = getColorSampler(aoAccuSampler,previousCoords.xy).rgb;
+
             float3 previousSSR = getColorSampler(ssrAccuSampler,previousCoords.xy).rgb;
             
             float3 gi = refGI*opacity+previousGI*(1.0-opacity);
-            outGI = float4(gi,1.0);
-            
-            float3 ao = refAo*opacity+previousAO*(1.0-opacity);
-            outAO = float4(ao,opacity);
+            float ao = refAo*opacity+previousAO*(1.0-opacity);
+            outGI = float4(gi,ao);
             
             float3 ssr = getColorSampler(sourceSSRSampler,coords).rgb;
             ssr = ssr*opacity+previousSSR*(1.0-opacity);
@@ -1182,13 +1181,14 @@ namespace DH_UBER_RT {
                         
                     // GI & AO
                     
-                    float4 color = getColorSamplerLod(sourceGISampler,currentCoords,firstPass ? (iSmoothStep-1.0)*0.5 : 0.0);
+                    float4 curPass = getColorSamplerLod(sourceGISampler,currentCoords,firstPass ? (iSmoothStep-1.0)*0.5 : 0.0);
+                    float3 color = curPass.rgb;
                     float4 ssrColor = getColorSamplerLod(sourceSSRSampler,ssrCurrentCoords, firstPass ? (iSmoothSSRStep-1.0)*0.5 : 0.0);
-                    float aoColor = getColorSamplerLod(sourceAOSampler,currentCoords,1.0+(firstPass ? (iSmoothSSRStep-1.0)*0.5:0.0)).r;
+                    float aoColor = curPass.a;
                    
                     float ssrWeight = maxOf3(ssrColor.rgb)>0 ? 1.0 : 0.0;
                     float aoWeight = 1.0;
-                    float giWeight = color.a;                       
+                    float giWeight = 1.0;                       
                     
                     // Distance weight;
                     float distWeight = pow(abs(1.0+iSmoothRadius/(dist+1)),fSmoothDistPow);
@@ -1243,31 +1243,23 @@ namespace DH_UBER_RT {
         ao /= aoWeightSum;
         ssr /= ssrWeightSum;
         
-#if MOTION_DETECTION
         if(passNumber==1) {
-            float3 previousCoords = getColorSampler(motionSampler,coords).xyz;
-            float3 previousGi = getColorSampler(giAccuSampler,previousCoords.xy).rgb;
-            
-            outGI = float4(gi*opacity+previousGi*(1.0-opacity),1.0);
+            outGI = lerp(float4(gi,ao),previousPass,1.0-opacity);
         } else {
-            outGI = float4(gi,1.0);
+            outGI = float4(gi,ao);
         }
-        outAO = float4(ao,ao,ao,1.0);
-#else
-        outGI = float4(gi,opacity);
-        outAO = float4(ao,ao,ao,aoOpacity);
-#endif
+
         outSSR = float4(ssr,1);
         
 
     }
     
-    void PS_SmoothPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outGI : SV_Target0, out float4 outAO : SV_Target1, out float4 outSSR : SV_Target2) {
-        smooth(1,giPassSampler,aoPassSampler,ssrPassSampler,coords,outGI,outAO,outSSR, true);
+    void PS_SmoothPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outGI : SV_Target0, out float4 outSSR : SV_Target1) {
+        smooth(1,giPassSampler,ssrPassSampler,coords,outGI,outSSR, true);
     }
     
-    void PS_AccuPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outGI : SV_Target0, out float4 outAO : SV_Target1, out float4 outSSR : SV_Target2) {
-        smooth(2,giSmoothPassSampler,aoSmoothPassSampler,ssrSmoothPassSampler,coords,outGI,outAO,outSSR, false);
+    void PS_AccuPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outGI : SV_Target0, out float4 outSSR : SV_Target1) {
+        smooth(2,giSmoothPassSampler,ssrSmoothPassSampler,coords,outGI,outSSR, false);
     }
     
     float computeColorPreservationGI(float colorBrightness, float giBrightness) {
@@ -1279,8 +1271,7 @@ namespace DH_UBER_RT {
         return colorPreservation;
     } 
     
-    float computeAo(float2 coords,float colorBrightness, float giBrightness) {
-        float ao = getColorSampler(aoAccuSampler,coords).x;
+    float computeAo(float ao,float colorBrightness, float giBrightness) {
         ao = pow(abs(ao),fAOMultiplier);
         ao = ao*(1.0-fAOProtect)+fAOProtect*(1.0-(1.0-ao)*(1.0-max(colorBrightness,giBrightness)));
         ao = ao*(1.0-fAODarkProtect)+fAODarkProtect*(1.0-(1.0-ao)*(min(colorBrightness,giBrightness)));
@@ -1305,7 +1296,7 @@ namespace DH_UBER_RT {
 #endif
         
         float3 fixedDarkHsl = colorHsl;
-        fixedDarkHsl.z = 1.0-pow(1.0-colorHsl.z,fMergingRoughness);
+        fixedDarkHsl.z = 1.0-pow(abs(1.0-colorHsl.z),fMergingRoughness);
         float3 fixedDark = HSLtoRGB(fixedDarkHsl);
         
         float ssrRatio2 = fixedDarkHsl.z/fMergingRoughness;
@@ -1328,8 +1319,10 @@ namespace DH_UBER_RT {
             color = saturate(color*fBaseColor);
             float3 colorHsl = RGBtoHSL(color);
             
+            float4 passColor = getColorSampler(giAccuSampler,coords);
             
-            float3 gi = getColorSampler(giAccuSampler,coords).rgb;
+            float3 gi = passColor.rgb;
+            float ao = passColor.a;
             float3 giHsl = RGBtoHSL(gi);
             
             float giBrightness =  getBrightness(gi);
@@ -1366,7 +1359,7 @@ namespace DH_UBER_RT {
             result = result*(1.0-colorPreservation)+colorPreservation*color;
             
             // Apply AO
-            float ao = computeAo(coords,colorBrightness,giBrightness);
+            ao = computeAo(ao,colorBrightness,giBrightness);
             result *= ao;
             
             // SSR
@@ -1388,7 +1381,7 @@ namespace DH_UBER_RT {
     
 
     
-    void PS_DisplayResult(in float4 position : SV_Position, in float2 coords : TEXCOORD, out float4 outPixel : SV_Target)
+    void PS_DisplayResult(in float4 position : SV_Position, in float2 coords : TEXCOORD, out float4 outPixel : SV_Target0)
     {        
         float3 result = 0;
         
@@ -1396,24 +1389,26 @@ namespace DH_UBER_RT {
             result = getColorSampler(resultSampler,coords).rgb;
             
         } else if(iDebug==DEBUG_GI) {
-            float3 gi =  getColorSampler(giAccuSampler,coords).rgb;
+            float4 passColor =  getColorSampler(giAccuSampler,coords);
+            float3 gi =  passColor.rgb;
             float giBrightness = getBrightness(gi);
             
             float3 color = getColor(coords).rgb;
             float colorBrightness = getBrightness(color);
             
-            float ao = computeAo(coords,colorBrightness,giBrightness);
+            float ao = computeAo(passColor.a,colorBrightness,giBrightness);
             
             result = gi;//*ao;
             
         } else if(iDebug==DEBUG_AO) {
-            float3 gi =  getColorSampler(giAccuSampler,coords).rgb;
+            float4 passColor =  getColorSampler(giAccuSampler,coords);
+            float3 gi =  passColor.rgb;
             float giBrightness = getBrightness(gi);
             
             float3 color = getColor(coords).rgb;
             float colorBrightness = getBrightness(color);
             
-            result = computeAo(coords,colorBrightness,giBrightness);
+            result = computeAo(passColor.a,colorBrightness,giBrightness);
             
         } else if(iDebug==DEBUG_SSR) {
             float3 color = getColor(coords).rgb;
@@ -1476,16 +1471,6 @@ namespace DH_UBER_RT {
             VertexShader = PostProcessVS;
             PixelShader = PS_GILightPass;
             RenderTarget = giPassTex;
-            RenderTarget1 = aoPassTex;
-            
-            ClearRenderTargets = false;
-                        
-            BlendEnable = true;
-            BlendOp = ADD;
-            SrcBlend = SRCALPHA;
-            SrcBlendAlpha = ONE;
-            DestBlend = INVSRCALPHA;
-            DestBlendAlpha = ONE;
         }
         
         // SSR
@@ -1509,34 +1494,13 @@ namespace DH_UBER_RT {
             VertexShader = PostProcessVS;
             PixelShader = PS_SmoothPass;
             RenderTarget = giSmoothPassTex;
-            RenderTarget1 = aoSmoothPassTex;
-            RenderTarget2 = ssrSmoothPassTex;
-            
-            
-            ClearRenderTargets = false;
-                        
-            BlendEnable = true;
-            BlendOp = ADD;
-            SrcBlend = SRCALPHA;
-            SrcBlendAlpha = ONE;
-            DestBlend = INVSRCALPHA;
-            DestBlendAlpha = ONE;
+            RenderTarget1 = ssrSmoothPassTex;
         }
         pass {
             VertexShader = PostProcessVS;
             PixelShader = PS_AccuPass;
             RenderTarget = giAccuTex;
-            RenderTarget1 = aoAccuTex;
-            RenderTarget2 = ssrAccuTex;
-            
-            ClearRenderTargets = false;
-                        
-            BlendEnable = true;
-            BlendOp = ADD;
-            SrcBlend = SRCALPHA;
-            SrcBlendAlpha = ONE;
-            DestBlend = INVSRCALPHA;
-            DestBlendAlpha = ONE;
+            RenderTarget1 = ssrAccuTex;
         }
         
         // Merging
