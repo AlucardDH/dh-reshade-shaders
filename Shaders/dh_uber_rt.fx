@@ -31,7 +31,7 @@
 // Define is GI rays should be directed to the background:
 // it make the GI looks like light is targeting the camera but the gain is less noise
 // Default is 1 (slightly biaised), 0 is no biais
-#define OPTIMIZATION_BIAISED_RT 0
+#define OPTIMIZATION_BIAISED_RT 1
 
 // Define the maximum distance a ray can travel
 // Default is 1.0 : the full screen/depth, less (0.5) can be enough depending on the game
@@ -42,6 +42,10 @@
 // if deactivated : lot of noise and blur when moving, less noise when static
 // This could make sence in game with a static camera (point & clicks for example)
 #define MOTION_DETECTION 1
+
+// Define is the roughness is actived
+// Default is 1 (activated), can be deactivated
+#define ROUGHNESS 1
 
 // Define is a light smoothing filter on Normal
 // Default is 1 (activated)
@@ -108,11 +112,6 @@ namespace DH_UBER_RT {
     
     texture previousColorTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8; };
     sampler previousColorSampler { Texture = previousColorTex; };
-    
-#if __RENDERER__ != 0x9000
-    texture depthTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = R32F; };
-    sampler depthSampler { Texture = depthTex; };
-#endif
 
     texture previousDepthTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = R32F; };
     sampler previousDepthSampler { Texture = previousDepthTex; };
@@ -144,7 +143,7 @@ namespace DH_UBER_RT {
     sampler aoAccuSampler { Texture = aoAccuTex; MinLOD = 0.0f; MaxLOD = 5.0f;};
 
     // SSR textures
-#if __RENDERER__ != 0x9000
+#if ROUGHNESS
     texture roughnessTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8; };
     sampler roughnessSampler { Texture = roughnessTex; };
 #endif
@@ -338,7 +337,7 @@ namespace DH_UBER_RT {
 
     // SSR
 
-#if __RENDERER__ != 0x9000
+#if ROUGHNESS
     uniform bool bRoughness <
         ui_type = "slider";
         ui_category = "SSR";
@@ -418,7 +417,7 @@ namespace DH_UBER_RT {
         ui_tooltip = "During denoising, give more importance to pixels in the same orientation\n"
                     "Higher will make GI less blurry\n"
                     "Lower will make curved geometry smoother";
-    > = 0.95;
+    > = 0.50;
     
     // Merging
         
@@ -475,7 +474,7 @@ namespace DH_UBER_RT {
         ui_tooltip = "Define this intensity of the Screan Space Reflection.";
     > = 0.5;
 
-#if __RENDERER__ != 0x9000
+#if ROUGHNESS
     uniform float fMergingRoughness <
         ui_type = "slider";
         ui_category = "Merging";
@@ -550,28 +549,20 @@ namespace DH_UBER_RT {
             && coords.y>=0 && coords.y<=1
             && coords.z>=0 && coords.z<=1;
     }
-
-    float getDepth(float2 coords) {
-#if __RENDERER__ == 0x9000
-        return ReShade::GetLinearizedDepth(coords);
-#else
-        return getColorSampler(depthSampler,coords).x;
-#endif
-    }
     
     float getPreviousDepth(float2 coords) {
         return getColorSampler(previousDepthSampler,coords).x;
     }
 
     float3 getWorldPosition(float2 coords) {
-        float depth = getDepth(coords);
+        float depth = ReShade::GetLinearizedDepth(coords);
         float3 result = float3((coords-0.5)*depth,depth);
         result *= BUFFER_SIZE3;
         return result;
     }
     
     float3 getWorldPositionForNormal(float2 coords) {
-        float depth = getDepth(coords);
+        float depth = ReShade::GetLinearizedDepth(coords);
         float3 result = float3((coords-0.5)*depth,depth);
         if(depth<fWeaponDepth) {
             result.z /= RESHADE_DEPTH_LINEARIZATION_FAR_PLANE;
@@ -594,7 +585,7 @@ namespace DH_UBER_RT {
     }
 
 
-#if __RENDERER__ != 0x9000
+#if ROUGHNESS
     float getRoughness(float2 coords) {
         return abs(getColorSampler(roughnessSampler,coords).r-0.5)*2;
     }
@@ -739,66 +730,59 @@ namespace DH_UBER_RT {
 #endif    
     
 
-#if __RENDERER__ != 0x9000
-    void PS_RoughnessDepthPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outRoughness : SV_Target0, out float4 outDepth : SV_Target1) {
+#if ROUGHNESS
+    void PS_RoughnessPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outRoughness : SV_Target0) {
+        
         float depth = ReShade::GetLinearizedDepth(coords);
-        float3 refColor = getColor(coords).rgb;
+        float3 refColor = getColor(coords).rgb;            
+        float refB = getBrightness(refColor);
+        
+        float roughness = 0.0;
 
-
-        if(!bRoughness) {
-            outRoughness = float4(0.5,0.5,0.5,1.0);
-            outDepth = float4(depth,depth,depth,1.0);
-        } else {
+        float tempA = 0;
+        float tempB = 0;
+        
+        float3 previousX = refColor;
+        float3 previousY = refColor;
+        for(int d = 1;d<=iRoughnessRadius;d++) {
+            float3 color = getColor(float2(coords.x+ReShade::PixelSize.x*d,coords.y)).rgb;
+            float3 diff = previousX-color;
+            float r = maxOf3(diff)/pow(d,0.5);
+            tempA += abs(r);
+            tempB = abs(r)>abs(tempB) ? r : tempB;
+            previousX = color;
             
-            float refB = getBrightness(refColor);
-            float roughness = 0.0;
-
-            float tempA = 0;
-            float tempB = 0;
-            
-            float3 previousX = refColor;
-            float3 previousY = refColor;
-            for(int d = 1;d<=iRoughnessRadius;d++) {
-                float3 color = getColor(float2(coords.x+ReShade::PixelSize.x*d,coords.y)).rgb;
-                float3 diff = previousX-color;
-                float r = maxOf3(diff)/pow(d,0.5);
-                tempA += abs(r);
-                tempB = abs(r)>abs(tempB) ? r : tempB;
-                previousX = color;
-                
-                color = getColor(float2(coords.x,coords.y+ReShade::PixelSize.y*d)).rgb;
-                diff = previousY-color;
-                r = maxOf3(diff)/pow(d,0.5);
-                tempA += abs(r);
-                tempB = abs(r)>abs(tempB) ? r : tempB;
-                previousY = color;
-            }
-            previousX = refColor;
-            previousY = refColor;
-            for(int d = 1;d<=iRoughnessRadius;d++) {
-                float3 color = getColor(float2(coords.x-ReShade::PixelSize.x*d,coords.y)).rgb;
-                float3 diff = previousX-color;
-                float r = maxOf3(diff)/pow(d,0.5);
-                tempA += abs(r);
-                tempB = abs(r)>abs(tempB) ? r : tempB;
-                previousX = color;
-                
-                color = getColor(float2(coords.x,coords.y-ReShade::PixelSize.y*d)).rgb;
-                diff = previousY-color;
-                r = maxOf3(diff)/pow(d,0.5);
-                tempA += abs(r);
-                tempB = abs(r)>abs(tempB) ? r : tempB;
-                previousY = color;
-            }
-            tempA /= iRoughnessRadius;
-            tempA *= sign(tempB);
-            roughness = tempA;
-
-            roughness = roughness/2+0.5;
-
-            outRoughness = float4(roughness,roughness,roughness,1.0);
-            outDepth = float4(depth,depth,depth,1.0);
+            color = getColor(float2(coords.x,coords.y+ReShade::PixelSize.y*d)).rgb;
+            diff = previousY-color;
+            r = maxOf3(diff)/pow(d,0.5);
+            tempA += abs(r);
+            tempB = abs(r)>abs(tempB) ? r : tempB;
+            previousY = color;
         }
+        previousX = refColor;
+        previousY = refColor;
+        for(int d = 1;d<=iRoughnessRadius;d++) {
+            float3 color = getColor(float2(coords.x-ReShade::PixelSize.x*d,coords.y)).rgb;
+            float3 diff = previousX-color;
+            float r = maxOf3(diff)/pow(d,0.5);
+            tempA += abs(r);
+            tempB = abs(r)>abs(tempB) ? r : tempB;
+            previousX = color;
+            
+            color = getColor(float2(coords.x,coords.y-ReShade::PixelSize.y*d)).rgb;
+            diff = previousY-color;
+            r = maxOf3(diff)/pow(d,0.5);
+            tempA += abs(r);
+            tempB = abs(r)>abs(tempB) ? r : tempB;
+            previousY = color;
+        }
+        tempA /= iRoughnessRadius;
+        tempA *= sign(tempB);
+        roughness = tempA;
+
+        roughness = roughness/2+0.5;
+
+        outRoughness = float4(roughness,roughness,roughness,1.0);
     }
 #endif
 
@@ -811,7 +795,7 @@ namespace DH_UBER_RT {
         
 
         #if NORMAL_FILTER
-            float depth = getDepth(coords);
+            float depth = ReShade::GetLinearizedDepth(coords);
             
             float3 normalTop = computeNormal(coords-offset.zy,offset);
             float3 normalBottom = computeNormal(coords+offset.zy,offset);
@@ -871,7 +855,7 @@ namespace DH_UBER_RT {
             
             deltaZ = screenWp.z-currentWp.z;
             
-            float depth = getDepth(screenCoords.xy);
+            float depth = ReShade::GetLinearizedDepth(screenCoords.xy);
             bool isSky = depth>fSkyDepth;
             if(isSky) {
                 skyed = true;
@@ -1057,7 +1041,7 @@ namespace DH_UBER_RT {
             return;
         }
         
-        float depth = getDepth(coords);
+        float depth = ReShade::GetLinearizedDepth(coords);
         if(depth>fSkyDepth) {
             outColor = float4(0,0,0,1);
         } else {
@@ -1071,7 +1055,7 @@ namespace DH_UBER_RT {
             
             float3 normal = getNormal(coords);
             
-#if __RENDERER__ != 0x9000
+#if ROUGHNESS
             if(bRoughness) {
                 float roughness = getRoughness(coords);
                 float randomness = roughness*1000*fRoughnessIntensity;
@@ -1120,7 +1104,7 @@ namespace DH_UBER_RT {
         sampler sourceSSRSampler,
         float2 coords, out float4 outGI, out float4 outAO, out float4 outSSR,bool firstPass) {
         
-        float refDepth = getDepth(coords);
+        float refDepth = ReShade::GetLinearizedDepth(coords);
         if(refDepth>fSkyDepth) {
             outGI = float4(getColor(coords).rgb,1.0);
             outAO = 1.0;
@@ -1191,7 +1175,7 @@ namespace DH_UBER_RT {
                 if(dist>iSmoothRadius) continue;
             
                 
-                float depth = getDepth(currentCoords);
+                float depth = ReShade::GetLinearizedDepth(currentCoords);
                 if(depth>fSkyDepth) continue;
                     
                     float3 normal = getNormal(currentCoords);
@@ -1313,7 +1297,7 @@ namespace DH_UBER_RT {
         float colorPreservation = computeColorPreservationSSR(colorHsl);
             
         float3 ssr = getColorSampler(ssrAccuSampler,coords).rgb;
-#if __RENDERER__ != 0x9000
+#if ROUGHNESS
         float roughness = getRoughness(coords);
 #else
         float roughness = 0;
@@ -1332,7 +1316,7 @@ namespace DH_UBER_RT {
     }
 
     void PS_UpdateResult(in float4 position : SV_Position, in float2 coords : TEXCOORD, out float4 outResult : SV_Target, out float4 outDepth : SV_Target1, out float4 outPreviousColor : SV_Target2) {
-        float depth = getDepth(coords);
+        float depth = ReShade::GetLinearizedDepth(coords);
         float3 color = getColor(coords).rgb;
         
         outPreviousColor = float4(color,1.0);
@@ -1438,17 +1422,17 @@ namespace DH_UBER_RT {
             result = computeSSR(coords,colorHsl)*1.5;
             
         } else if(iDebug==DEBUG_ROUGHNESS) {
-#if __RENDERER__ != 0x9000
+#if ROUGHNESS
             result = getColorSampler(roughnessSampler,coords).rgb;
 #endif
         } else if(iDebug==DEBUG_DEPTH) {
-            result = getDepth(coords);
+            result = ReShade::GetLinearizedDepth(coords);
             
         } else if(iDebug==DEBUG_NORMAL) {
             result = getColorSampler(normalSampler,coords).rgb;
             
         } else if(iDebug==DEBUG_SKY) {
-            float depth = getDepth(coords).r;
+            float depth = ReShade::GetLinearizedDepth(coords);
             result = depth>fSkyDepth?1.0:0.0;
             
         } else if(iDebug==DEBUG_MOTION) {
@@ -1466,13 +1450,12 @@ namespace DH_UBER_RT {
 // TEHCNIQUES 
     
     technique DH_UBER_RT {
-#if __RENDERER__ != 0x9000
+#if ROUGHNESS
         // Normal Roughness
         pass {
             VertexShader = PostProcessVS;
-            PixelShader = PS_RoughnessDepthPass;
+            PixelShader = PS_RoughnessPass;
             RenderTarget = roughnessTex;
-            RenderTarget1 = depthTex;
         }
 #endif
 #if MOTION_DETECTION
