@@ -47,8 +47,8 @@
 // Default is 1 (activated)
 #define NORMAL_FILTER 1
 
-#define TEX_NOISE __RENDERER__==0x9000
-#define OPTIMIZATION_ONE_LOOP_RT __RENDERER__==0x9000
+#define TEX_NOISE (__RENDERER__==0x9000)
+#define OPTIMIZATION_ONE_LOOP_RT (__RENDERER__==0x9000)
 
 // CONSTANTS /////////////////////////////////////////////////////////////////
 // Don't touch this
