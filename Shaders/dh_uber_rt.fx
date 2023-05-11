@@ -157,9 +157,9 @@ namespace DH_UBER_RT {
     uniform int random < source = "random"; min = 0; max = 512; >;
 
 // Parameters
+
+
 /*
-
-
     uniform bool bTest = true;
     uniform float fTest <
         ui_type = "slider";
@@ -168,7 +168,7 @@ namespace DH_UBER_RT {
     > = 0.99;
     uniform bool bTest2 = true;
     uniform bool bTest3 = true;
-    */
+  */  
    
     uniform int iDebug <
         ui_category = "Debug";
@@ -356,7 +356,7 @@ namespace DH_UBER_RT {
         ui_min = 0.0; ui_max = 5;
         ui_step = 0.01;
         ui_tooltip = "Define the intensity of AO";
-    > = 2.0;
+    > = 3.0;
     
     uniform float fAOPow <
         ui_type = "slider";
@@ -375,7 +375,7 @@ namespace DH_UBER_RT {
         ui_step = 0.1;
         ui_tooltip = "Define the range of AO\n"
                     "High values will make the scene darker";
-    > = 80;
+    > = 100;
     
     uniform float fAOLightProtect <
         ui_type = "slider";
@@ -393,7 +393,7 @@ namespace DH_UBER_RT {
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
         ui_tooltip = "Protection of dark areas to avoid totally black and unplayable parts";
-    > = 0.0;
+    > = 0.2;
     
 
 
@@ -490,7 +490,7 @@ namespace DH_UBER_RT {
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
         ui_tooltip = "Distance from where the effect is less applied.";
-    > = 0.75;
+    > = 0.9;
     
     uniform float fBaseColor <
         ui_type = "slider";
@@ -505,18 +505,18 @@ namespace DH_UBER_RT {
         ui_type = "slider";
         ui_category = "Merging";
         ui_label = "GI Light";
-        ui_min = 0.01; ui_max = 10.0;
+        ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
         ui_tooltip = "Define how much bright areas are affected by GI.";
-    > = 1.0;
+    > = 0.5;
     uniform float fGIDarkMerging <
         ui_type = "slider";
         ui_category = "Merging";
         ui_label = "GI Dark";
-        ui_min = 0.01; ui_max = 10.0;
+        ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
         ui_tooltip = "Define how much dark areas are affected by GI.";
-    > = 1.5;
+    > = 0.5;
     
     uniform float fGIFinalMerging <
         ui_type = "slider";
@@ -525,7 +525,7 @@ namespace DH_UBER_RT {
         ui_min = 0; ui_max = 1.0;
         ui_step = 0.01;
         ui_tooltip = "Define how much the whole image is affected by GI.";
-    > = 0.75;
+    > = 0.5;
     
     uniform float fMergingSSR <
         ui_type = "slider";
@@ -1013,7 +1013,7 @@ namespace DH_UBER_RT {
         
     #if MOTION_DETECTION
         if(previousCoords.z<=fMotionDistanceThreshold) {
-            mergedGiColor = max(mergedGiColor,previousFrame.rgb);
+            mergedGiColor = max(mergedGiColor,previousFrame.rgb*previousFrameOpacity);
         }
     #else
         mergedGiColor = max(mergedGiColor,previousFrame.rgb*previousFrameOpacity); 
@@ -1238,7 +1238,8 @@ namespace DH_UBER_RT {
             outResult = float4(color,1.0);
         } else {
             color = saturate(color*fBaseColor);
-            float colorBrightness = getBrightness(color);
+            float originalColorBrightness = getBrightness(color);
+            float colorBrightness = originalColorBrightness;
             float colorPureness = getPureness(color);
             
             float4 passColor = getColorSampler(giAccuSampler,coords);
@@ -1256,27 +1257,20 @@ namespace DH_UBER_RT {
             colorPureness = getPureness(color);
             
             // Base color
-            float3 result = 0;
+            float3 result = color;
             
             // GI
             
-            float3 dark = saturate((color+gi)*(color/10.0+1.0));
-            float3 light = saturate((color+0.1)*gi);
-            result = 0;
-            
             // Dark areas
-            float3 rDark = pow(color,1.0/(fGIDarkMerging+0.001));
-            result += (1.0-colorBrightness)*(rDark*dark+(1.0-rDark)*color);
+            result += gi*fGIDarkMerging*saturate(fGIDarkMerging-colorBrightness);
             
             // Light areas
-            float3 rLight = saturate((1.0-colorBrightness)*(1.0-colorPureness)*giPureness*fGILightMerging);
-            light = (color+0.5)*gi;
-            result += lerp(color,light,rLight);
+            result += (color+0.1)*gi*fGILightMerging;
             
             // Mixing
             float colorPreservation = saturate(pow(abs(colorBrightness*2.0-1.0),10*fGIFinalMerging));
             result = lerp(result,color,colorPreservation);
-            
+                
             // SSR
             float3 ssr = computeSSR(coords,colorBrightness);
             result += ssr;
@@ -1288,6 +1282,7 @@ namespace DH_UBER_RT {
                 float ratio = diff/max;
                 result = result*(1.0-ratio)+color*ratio;
             }
+          
             
             outResult = float4(result,1);
         }
