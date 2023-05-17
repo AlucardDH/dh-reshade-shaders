@@ -158,10 +158,15 @@ namespace DH_UBER_RT {
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.001;
     > = 0.99;
+    uniform int iTest <
+        ui_type = "slider";
+        ui_min = 1; ui_max = 16;
+        ui_step = 1;
+    > = 1;
     uniform bool bTest2 = true;
     uniform bool bTest3 = true;
 */
-   
+
     uniform int iDebug <
         ui_category = "Debug";
         ui_type = "combo";
@@ -171,14 +176,6 @@ namespace DH_UBER_RT {
     > = 0;
     
 // DEPTH
-
-    uniform float fDepthHitThreshold <
-        ui_type = "slider";
-        ui_category = "Common Depth";
-        ui_label = "Depth hit threshold";
-        ui_min = 0.0; ui_max = 1.0;
-        ui_step = 0.001;
-    > = 0.010;
 
     uniform float fDepthMultiplier <
         ui_type = "slider";
@@ -210,6 +207,17 @@ namespace DH_UBER_RT {
     
 // COMMMON RT
 // MOTION
+    uniform int iCheckerboardRT <
+        ui_category = "Common RT";
+        ui_type = "combo";
+        ui_label = "Checkerboard ray tracing";
+        ui_items = "Disabled\0Half per frame\0Quarter per frame\0";
+        ui_tooltip = "One ray per pixel, 1 ray per 2-pixels or 1 ray per 4-pixels\n"
+                    "Lower=less ghosting, less performance\n"
+                    "Higher=more ghosting, less noise, better performance\n"
+                    "POSITIVE INPACT ON PERFORMANCES";
+    > = 0;
+
 #if MOTION_DETECTION
     uniform int iMotionRadius <
         ui_type = "slider";
@@ -502,7 +510,7 @@ namespace DH_UBER_RT {
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
         ui_tooltip = "Define how much bright areas are affected by GI.";
-    > = 0.25;
+    > = 0.30;
     uniform float fGIDarkMerging <
         ui_type = "slider";
         ui_category = "Merging";
@@ -510,7 +518,7 @@ namespace DH_UBER_RT {
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
         ui_tooltip = "Define how much dark areas are affected by GI.";
-    > = 0.75;
+    > = 0.60;
     
     uniform float fGIFinalMerging <
         ui_type = "slider";
@@ -519,7 +527,7 @@ namespace DH_UBER_RT {
         ui_min = 0; ui_max = 1.0;
         ui_step = 0.01;
         ui_tooltip = "Define how much the whole image is affected by GI.";
-    > = 0.5;
+    > = 0.75;
     
     uniform bool bGIHDR <
         ui_category = "Merging";
@@ -547,8 +555,40 @@ namespace DH_UBER_RT {
     > = 0.6;
 #endif
 
+    uniform int iBlackLevel <
+        ui_type = "slider";
+        ui_category = "Merging";
+        ui_label = "Black level";
+        ui_min = 0; ui_max = 255;
+        ui_step = 0.001;
+    > = 6;
+    
+    uniform int iWhiteLevel <
+        ui_type = "slider";
+        ui_category = "Merging";
+        ui_label = "Black level";
+        ui_min = 0; ui_max = 255;
+        ui_step = 0.001;
+    > = 240;
+
 // FUCNTIONS
 
+// Colors
+    float3 RGBtoHSV(float3 c) {
+        float4 K = float4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+        float4 p = lerp(float4(c.bg, K.wz), float4(c.gb, K.xy), step(c.b, c.g));
+        float4 q = lerp(float4(p.xyw, c.r), float4(c.r, p.yzx), step(p.x, c.r));
+    
+        float d = q.x - min(q.w, q.y);
+        float e = 1.0e-10;
+        return float3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+    }
+    
+    float3 HSVtoRGB(float3 c) {
+        float4 K = float4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+        float3 p = abs(frac(c.xxx + K.xyz) * 6.0 - K.www);
+        return c.z * lerp(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+    }
 
 // Screen
     
@@ -657,6 +697,9 @@ namespace DH_UBER_RT {
 
 // PS
 #if MOTION_DETECTION
+    float3 getPreviousCoords(float2 coords) {
+        return  getColorSampler(motionSampler,coords).xyz;      
+    }
     
     float2 motionDistance(float2 refCoords, float3 refColor,float3 refAltColor,float refDepth, float2 currentCoords) {
         float currentDepth = getColorSampler(previousDepthSampler,currentCoords).x;
@@ -827,7 +870,7 @@ namespace DH_UBER_RT {
     }
     
     bool checkHit(float minDepth,float thickness,float rayDepth) {
-        return rayDepth>=minDepth && rayDepth<=minDepth+thickness+fDepthHitThreshold;
+        return rayDepth>=minDepth && rayDepth<=minDepth+thickness+0.1;
     }
     
     
@@ -849,7 +892,7 @@ namespace DH_UBER_RT {
         float deltaZbefore = 0.0;
 
         
-        float3 lastSky = 0.5;
+        float3 lastSky = 0.0;
         
         bool firstStep = true;
         
@@ -896,7 +939,7 @@ namespace DH_UBER_RT {
                 firstStep = false; 
                 
             } else if(outScreen) {
-                if(lastSky.x!=0.5) {
+                if(lastSky.x!=0.0) {
                     return float4(lastSky,RT_HIT_SKY);
                 }
                     
@@ -950,6 +993,15 @@ namespace DH_UBER_RT {
     }
 
 // GI
+    int halfIndex(float2 coords) {
+        int2 coordsInt = (coords * RENDER_SIZE)%2;
+        return coordsInt.x==coordsInt.y?0:1;
+    }
+    
+    int quadIndex(float2 coords) {
+        int2 coordsInt = (coords * RENDER_SIZE)%2;
+        return coordsInt.x+coordsInt.y*2;
+    }
 
     void PS_GILightPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outGI : SV_Target0) {
         
@@ -964,12 +1016,21 @@ namespace DH_UBER_RT {
         
         float3 previousCoords;
 #if MOTION_DETECTION
-        previousCoords = getColorSampler(motionSampler,coords).xyz;
+        previousCoords = getPreviousCoords(coords);
 #else
         previousCoords = float3(coords,1.0);
 #endif
 
         float4 previousFrame = getColorSampler(giAccuSampler,previousCoords.xy);
+        
+        if(iCheckerboardRT==1 && halfIndex(coords)!=framecount%2) {
+            outGI = previousFrame;
+            return;
+        }
+        if(iCheckerboardRT==2 && quadIndex(coords)!=framecount%4) {
+            outGI = previousFrame;
+            return;
+        }
         
         float4 hitPosition;
         float3 screenCoords;
@@ -996,14 +1057,19 @@ namespace DH_UBER_RT {
 
             float4 giColor;
             if(hitPosition.a>=0) {
-                hitPreviousCoords = getColorSampler(motionSampler,screenCoords.xy).xyz;
+                hitPreviousCoords = getPreviousCoords(screenCoords.xy);
                 giColor.rgb = getRayColor(screenCoords.xy,hitPreviousCoords.xy).rgb;
                 giColor.rgb *= pow(abs(1.0-d/RESHADE_DEPTH_LINEARIZATION_FAR_PLANE),fGIDistancePower);
-            } else if(fSkyColor>0 && hitPosition.a==-RT_HIT_SKY) {
+            } else if(fSkyColor>0 && hitPosition.a==RT_HIT_SKY) {
                 giColor.rgb = getColor(screenCoords.xy).rgb*fSkyColor;
-            } else if(hitPosition.a==-RT_MISSED) {
-                giColor.rgb = previousFrame.rgb;
+            } else if(hitPosition.a==RT_MISSED) {
+                giColor.rgb = 0;
             }
+            
+
+            float3 giHsv = RGBtoHSV(giColor.rgb);
+            giHsv.y = saturate(pow(giHsv.y,0.5));
+            giColor.rgb = HSVtoRGB(giHsv);
             
             giColor.a = getBrightness(giColor.rgb);
             // Use saturation
@@ -1062,7 +1128,7 @@ namespace DH_UBER_RT {
             
             float4 hitPosition = trace(targetWp,lightVector,depth,true);
 #if MOTION_DETECTION
-            float3 previousCoords = getColorSampler(motionSampler,coords).xyz;
+            float3 previousCoords = getPreviousCoords(coords);
 #else
             float3 previousCoords = float3(coords,1.0);
 #endif
@@ -1155,6 +1221,12 @@ namespace DH_UBER_RT {
                 
                     weight *= dw*dw;
                 }
+                
+                if(iCheckerboardRT==1 && halfIndex(currentCoords)==framecount%2) {
+                    weight *= 2;
+                } else if(iCheckerboardRT==2 && quadIndex(currentCoords)==framecount%4) {
+                    weight *= 4;
+                }
                  
                 giAo += curGiAo*weight;
                 ssr += ssrColor * weight;
@@ -1169,7 +1241,7 @@ namespace DH_UBER_RT {
         if(firstPass) {
             float3 previousCoords;
 #if MOTION_DETECTION
-            previousCoords = getColorSampler(motionSampler,coords).xyz;
+            previousCoords = getPreviousCoords(coords);
 #else
             previousCoords = float3(coords,1.0);
 #endif
@@ -1281,10 +1353,13 @@ namespace DH_UBER_RT {
             // Mixing
             float colorPreservation = saturate(pow(abs(colorBrightness*2.0-1.0),10*fGIFinalMerging));
             result = lerp(result,color,colorPreservation);
-                
+            
             // SSR
             float3 ssr = computeSSR(coords,colorBrightness);
             result += ssr;
+            
+            // Levels
+            result = (result-iBlackLevel/255.0)/((iWhiteLevel-iBlackLevel)/255.0);
             
             // Distance fading
             if(fDistanceFading<1.0 && depth>fDistanceFading) {
@@ -1352,7 +1427,7 @@ namespace DH_UBER_RT {
             
         } else if(iDebug==DEBUG_MOTION) {
 #if MOTION_DETECTION
-            float3  motion = getColorSampler(motionSampler,coords).xyz;
+            float3  motion = getPreviousCoords(coords);
             motion.xy = (motion.xy-coords)*50;
             result = motion;
 #endif         
