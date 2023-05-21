@@ -28,7 +28,7 @@ namespace DH_UBER_MOTION {
 // Textures
 
     // Common textures
-	texture halfMotionTex { Width = BUFFER_WIDTH>>1; Height = BUFFER_HEIGHT>>1; Format = RG16F;};
+    texture halfMotionTex { Width = BUFFER_WIDTH>>1; Height = BUFFER_HEIGHT>>1; Format = RG16F;};
     sampler halfMotionSampler { Texture = halfMotionTex; MipFilter = Point; MinFilter = Point; MagFilter = Point;};
 
     texture colorTex { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA8; MipLevels = 6;  };
@@ -53,21 +53,32 @@ namespace DH_UBER_MOTION {
                     "Higher=better motion detection, less performance\n"
                     "/!\\ HAS A BIG INPACT ON PERFORMANCES";
     > = 4;
+    
+    /*
+    uniform float fTest <
+        ui_type = "slider";
+        ui_min = 0.0; ui_max = 10.0;
+        ui_step = 0.001;
+    > = 0.001;
+    uniform bool bTest = true;
+    uniform bool bTest2 = true;
+    uniform bool bTest3 = true;
+    */
 
 // PS
 
-	float3 getFirst(sampler sourceSampler, float2 coords) {
-		return getColorSampler(sourceSampler,coords).rgb;
-	}
-	
-	float3 getSecond(sampler sourceSampler, float2 coords) {
-		return getColorSamplerLod(sourceSampler,(coords-ReShade::PixelSize*8),2.5).rgb;
-	}
+    float3 getFirst(sampler sourceSampler, float2 coords) {
+        return getColorSampler(sourceSampler,coords).rgb;
+    }
+    
+    float3 getSecond(sampler sourceSampler, float2 coords) {
+        return getColorSamplerLod(sourceSampler,(coords-ReShade::PixelSize*8),2.5).rgb;
+    }
     
     float motionDistance(float2 refCoords, float3 refColor,float3 refAltColor,float refDepth, float2 currentCoords) {
         float2 pixelSize = ReShade::PixelSize;
-		
-		float currentDepth = getColorSampler(previousDepthSampler,currentCoords).x;
+        
+        float currentDepth = getColorSampler(previousDepthSampler,currentCoords).x;
         float diffDepth = abs(refDepth-currentDepth);
         
         float3 currentColor = getFirst(previousColorSampler,currentCoords);
@@ -79,21 +90,23 @@ namespace DH_UBER_MOTION {
         float dist = distance(refCoords,currentCoords);
         dist += maxOf3(diffColor);
         dist += maxOf3(diffAltColor);
-  	  dist *= 0.0001+diffDepth;
+      dist *= 0.01+diffDepth;
         
         return dist;     
     }
     
     void PS_MotionPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float2 outMotion : SV_Target0) {
+    
+        float2 refCoords = coords + 0.75*getColorSamplerLod(sTexMotionVectorsSampler,coords,2).xy;
         float2 pixelSize = ReShade::PixelSize;
-		float3 refColor = getFirst(colorSampler,coords);
+        float3 refColor = getFirst(colorSampler,coords);
         float3 refAltColor = getSecond(colorSampler,coords);
         float refDepth = ReShade::GetLinearizedDepth(coords);
 
         int2 delta = 0;
         float deltaStep = 1;
         
-        float2 currentCoords = coords;
+        float2 currentCoords = refCoords;
         float dist = motionDistance(coords,refColor,refAltColor,refDepth,currentCoords);
                 
         float bestDist = dist;
@@ -109,7 +122,7 @@ namespace DH_UBER_MOTION {
                 delta.x = dx;
                 delta.y = radius-dx;
                 
-                currentCoords = coords+pixelSize*delta*deltaStep;
+                currentCoords = refCoords+pixelSize*delta*deltaStep;
                 dist = motionDistance(coords,refColor,refAltColor,refDepth,currentCoords);
                 if(dist<bestDist) {
                     bestDist = dist;
@@ -117,37 +130,37 @@ namespace DH_UBER_MOTION {
                 }
                 
                 if(dx!=0) {
-	                delta.x = -dx;
-	                
-	                currentCoords = coords+pixelSize*delta*deltaStep;
-	                dist = motionDistance(coords,refColor,refAltColor,refDepth,currentCoords);
-	                if(dist<bestDist) {
-	                    bestDist = dist;
-	                    bestMotion = currentCoords;
-	                }
+                    delta.x = -dx;
+                    
+                    currentCoords = refCoords+pixelSize*delta*deltaStep;
+                    dist = motionDistance(coords,refColor,refAltColor,refDepth,currentCoords);
+                    if(dist<bestDist) {
+                        bestDist = dist;
+                        bestMotion = currentCoords;
+                    }
                 }
                 
                 if(delta.y!=0) {
-	                delta.x = dx;
-	                delta.y = -(delta.y);
-	                
-	                currentCoords = coords+pixelSize*delta*deltaStep;
-	                dist = motionDistance(coords,refColor,refAltColor,refDepth,currentCoords);
-	                if(dist<bestDist) {
-	                    bestDist = dist;
-	                    bestMotion = currentCoords;
-	                }
+                    delta.x = dx;
+                    delta.y = -(delta.y);
+                    
+                    currentCoords = refCoords+pixelSize*delta*deltaStep;
+                    dist = motionDistance(coords,refColor,refAltColor,refDepth,currentCoords);
+                    if(dist<bestDist) {
+                        bestDist = dist;
+                        bestMotion = currentCoords;
+                    }
                 }
                 
                 if(dx!=0) {
-	                delta.x = -dx;
-	                
-	                currentCoords = coords+pixelSize*delta*deltaStep;
-	                dist = motionDistance(coords,refColor,refAltColor,refDepth,currentCoords);
-	                if(dist<bestDist) {
-	                    bestDist = dist;
-	                    bestMotion = currentCoords;
-	                }
+                    delta.x = -dx;
+                    
+                    currentCoords = refCoords+pixelSize*delta*deltaStep;
+                    dist = motionDistance(coords,refColor,refAltColor,refDepth,currentCoords);
+                    if(dist<bestDist) {
+                        bestDist = dist;
+                        bestMotion = currentCoords;
+                    }
                 }
             }
         }
