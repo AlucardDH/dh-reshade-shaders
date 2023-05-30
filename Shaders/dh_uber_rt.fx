@@ -559,6 +559,10 @@ namespace DH_UBER_RT {
 
 // FUCNTIONS
 
+	float safePow(float value, float power) {
+		return pow(abs(value),power);
+	}
+
 // Colors
     float3 RGBtoHSV(float3 c) {
         float4 K = float4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
@@ -698,14 +702,14 @@ namespace DH_UBER_RT {
         for(int d = 1;d<=iRoughnessRadius;d++) {
             float3 color = getColor(float2(coords.x+ReShade::PixelSize.x*d,coords.y)).rgb;
             float3 diff = previousX-color;
-            float r = maxOf3(diff)/pow(d,0.5);
+            float r = maxOf3(diff)/safePow(d,0.5);
             tempA += abs(r);
             tempB = abs(r)>abs(tempB) ? r : tempB;
             previousX = color;
             
             color = getColor(float2(coords.x,coords.y+ReShade::PixelSize.y*d)).rgb;
             diff = previousY-color;
-            r = maxOf3(diff)/pow(d,0.5);
+            r = maxOf3(diff)/safePow(d,0.5);
             tempA += abs(r);
             tempB = abs(r)>abs(tempB) ? r : tempB;
             previousY = color;
@@ -716,14 +720,14 @@ namespace DH_UBER_RT {
         for(int d = 1;d<=iRoughnessRadius;d++) {
             float3 color = getColor(float2(coords.x-ReShade::PixelSize.x*d,coords.y)).rgb;
             float3 diff = previousX-color;
-            float r = maxOf3(diff)/pow(d,0.5);
+            float r = maxOf3(diff)/safePow(d,0.5);
             tempA += abs(r);
             tempB = abs(r)>abs(tempB) ? r : tempB;
             previousX = color;
             
             color = getColor(float2(coords.x,coords.y-ReShade::PixelSize.y*d)).rgb;
             diff = previousY-color;
-            r = maxOf3(diff)/pow(d,0.5);
+            r = maxOf3(diff)/safePow(d,0.5);
             tempA += abs(r);
             tempB = abs(r)>abs(tempB) ? r : tempB;
             previousY = color;
@@ -1024,12 +1028,13 @@ namespace DH_UBER_RT {
         float mergedAO = 1.0;
         
         int hits = 0;
-        int maxRays = iRTMaxRays;
 
 #if !OPTIMIZATION_ONE_LOOP_RT
+        int maxRays = iRTMaxRays;
         [loop]
         for(int rays=0;rays<maxRays && maxRays<=iRTMaxRays*OPTIMIZATION_MAX_RETRIES_FAST_MISS_RATIO && (hits==0||mergedGiColor.a<fRTMinRayBrightness);rays++) {
 #else
+        int maxRays = 0;
         int rays = 0;
 #endif
             float3 lightVector;
@@ -1051,7 +1056,7 @@ namespace DH_UBER_RT {
                 hits++;
                 hitPreviousCoords = getPreviousCoords(screenCoords.xy);
                 giColor.rgb = getRayColor(screenCoords.xy,hitPreviousCoords.xy).rgb;
-                giColor.rgb *= pow(abs(1.0-d/RESHADE_DEPTH_LINEARIZATION_FAR_PLANE),fGIDistancePower);
+                giColor.rgb *= safePow(1.0-d/RESHADE_DEPTH_LINEARIZATION_FAR_PLANE,fGIDistancePower);
                 
                 // Reduce light halo
                 giColor.rgb *= saturate(1.0+deltaZ*2);
@@ -1073,7 +1078,7 @@ namespace DH_UBER_RT {
             mergedGiColor = giColor.a>mergedGiColor.a? giColor : mergedGiColor;
             
             if(depth>=fWeaponDepth && hitPosition.a>0) {
-                float ao = 1.0-pow(saturate(1.0-d/BUFFER_WIDTH),abs(fAOPow));
+                float ao = 1.0-safePow(saturate(1.0-d/BUFFER_WIDTH),abs(fAOPow));
                 ao = lerp(ao,1,-deltaZ*5.0);
                 mergedAO = min(ao,mergedAO);
             }
@@ -1201,7 +1206,7 @@ namespace DH_UBER_RT {
                     : getColorSamplerLod(sourceSSRSampler,ssrCurrentCoords, firstPass ? iSmoothSSRStep*0.5 : 0.0).rgb;
                 
                 // Distance weight | gi,ao,ssr 
-                float weight = pow(abs(1.0+iSmoothRadius/(dist+1)),fSmoothDistPow);             
+                float weight = safePow(1.0+iSmoothRadius/(dist+1),fSmoothDistPow);             
                 
                 { // Normal weight
                     float3 normal = getNormal(currentCoords);
@@ -1279,7 +1284,7 @@ namespace DH_UBER_RT {
     float computeAo(float ao,float colorBrightness, float giBrightness) {
         ao = lerp(ao,1,giBrightness);
         
-        ao = saturate(pow(abs(ao),fAOMultiplier));
+        ao = saturate(safePow(ao,fAOMultiplier));
         ao = lerp(ao,1.0,saturate(colorBrightness*fAOLightProtect*2.0));
         ao = lerp(ao,1.0,saturate((1.0-colorBrightness)*fAODarkProtect*2.0));
 
@@ -1290,18 +1295,18 @@ namespace DH_UBER_RT {
         float3 ssr = getColorSampler(ssrAccuSampler,coords).rgb;
         float ssrBrightness = getBrightness(ssr);
         
-        float colorPreservation = lerp(1,pow(brightness,2),1.0-pow(1.0-brightness,10));
+        float colorPreservation = lerp(1,safePow(brightness,2),1.0-safePow(1.0-brightness,10));
         
         ssr = lerp(ssr,ssr*0.5,ssrBrightness);            
         
 #if ROUGHNESS
-        float roughness = pow(getRoughness(coords),2.0);
+        float roughness = safePow(getRoughness(coords),2.0);
 #else
         float roughness = 0;
         float fMergingRoughness = 0.001;
 #endif
         
-        float fixedDark = 1.0-pow(1.0-brightness,fMergingRoughness);
+        float fixedDark = 1.0-safePow(1.0-brightness,fMergingRoughness);
         
         float ssrRatio2 = fixedDark/fMergingRoughness;
         float ssrRatio1 = max(0.0,saturate(1.0-(roughness+0.1))*fMergingRoughness);
@@ -1352,7 +1357,7 @@ namespace DH_UBER_RT {
             result += (color+0.1)*gi*fGILightMerging;
             
             // Mixing
-            float colorPreservation = saturate(pow(abs(colorBrightness*2.0-1.0),10*fGIFinalMerging));
+            float colorPreservation = saturate(safePow(colorBrightness*2.0-1.0,10*fGIFinalMerging));
             result = lerp(result,color,colorPreservation);
             
             // SSR
