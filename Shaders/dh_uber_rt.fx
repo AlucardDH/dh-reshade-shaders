@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// DH_UBER_RT 0.7.0 (2023-06-07)
+// DH_UBER_RT 0.8.0 (2023-06-13)
 //
 // This shader is free, if you paid for it, you have been ripped and should ask for a refund.
 //
@@ -213,7 +213,7 @@ namespace DH_UBER_RT {
         ui_type = "slider";
         ui_category = "Common RT";
         ui_label = "Opti Fast hit";
-        ui_tooltip = "";
+        ui_tooltip = "Simplify hit detection to get more performances";
     > = true;
     
     uniform int iRTCheckHitPrecision <
@@ -316,7 +316,7 @@ namespace DH_UBER_RT {
         ui_min = 0; ui_max = 1.0;
         ui_step = 0.01;
         ui_tooltip = "Brighten dark colors, useful in dark corners";
-    > = 0.0;
+    > = 0.1;
     
     uniform float fGIBounce <
         ui_type = "slider";
@@ -362,7 +362,7 @@ namespace DH_UBER_RT {
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
         ui_tooltip = "Protection of bright areas to avoid washed out highlights";
-    > = 0.15;
+    > = 0.10;
     
     uniform float fAODarkProtect <
         ui_type = "slider";
@@ -371,7 +371,7 @@ namespace DH_UBER_RT {
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
         ui_tooltip = "Protection of dark areas to avoid totally black and unplayable parts";
-    > = 0.30;
+    > = 0.10;
     
 
 
@@ -417,7 +417,7 @@ namespace DH_UBER_RT {
     > = 0.05;
 #endif
 
-    // Denoising
+// Denoising
     uniform int iSmoothRadius <
         ui_type = "slider";
         ui_category = "Denoising";
@@ -449,17 +449,6 @@ namespace DH_UBER_RT {
         ui_tooltip = "Define the max distance of smoothing.\n"
                     "Higher:less noise, less performances\n"
                     "/!\\ HAS A BIG INPACT ON PERFORMANCES";
-    > = 1;
-    
-    uniform int iSmoothSSRStep <
-        ui_type = "slider";
-        ui_category = "Denoising";
-        ui_label = "SSR Step";
-        ui_min = 0; ui_max = 8;
-        ui_step = 0;
-        ui_tooltip = "Same as 'Step' but for SSR\n"
-                    "Higher:less noise, can smooth surfaces that should not be mixed\n"
-                    "This has no impact on performances :)";
     > = 1;
     
     uniform float fSmoothDistPow <
@@ -681,11 +670,6 @@ namespace DH_UBER_RT {
         if(fGIBounce>0.0) {
             color += min(0.5,1.0-getBrightness(color))*getColorSampler(giAccuSampler,previousCoords).rgb*fGIBounce;
         }
-        if(fGIDarkAmplify>0) {
-            float3 hsv = RGBtoHSV(color);
-            hsv.z = saturate(hsv.z+fGIDarkAmplify);
-            color = HSVtoRGB(hsv);
-        }
         return color;
     }
 
@@ -825,10 +809,14 @@ namespace DH_UBER_RT {
         outProbe = float4(weightSum<0.1?0:sum/weightSum,1.0);
         
     }
-#endif    
+#endif
+
+    bool hitting(float deltaZ, float maxDeltaZ, bool ssr) {
+        return (deltaZ>=0 && deltaZ<=maxDeltaZ) || (deltaZ<0 && -deltaZ<=maxDeltaZ+(ssr?0:16/iRTCheckHitPrecision));
+    }
     
     bool crossing(float deltaZbefore, float deltaZ) {
-        return (deltaZ<0 && deltaZbefore>0) || (deltaZ>0 && deltaZbefore<0);
+        return  (deltaZ<=0 && deltaZbefore>=0) || (deltaZ>=0 && deltaZbefore<=0);
     }
     
     float4 trace(float3 refWp,float3 lightVector,float startDepth,bool ssr) {
@@ -902,12 +890,13 @@ namespace DH_UBER_RT {
                 bool crossed = crossing(deltaZbefore,deltaZ);
                 
                 if(crossed) {
-                    
+                    bool hit = false;                   
+                        
+                    currentWp -= incrementVector; 
                     float3 subIncVec = incrementVector;
-                    currentWp -= incrementVector;                    
                     
                     [loop]
-                    for(int i=0;i<iRTCheckHitPrecision;i++) {
+                    for(int i=0;!hit && i<iRTCheckHitPrecision;i++) {
                         subIncVec *= 0.5;
                         currentWp += subIncVec;
                         
@@ -915,24 +904,17 @@ namespace DH_UBER_RT {
                         depth = ReShade::GetLinearizedDepth(screenCoords.xy);
                        
                         screenWp = getWorldPosition(screenCoords.xy,depth);
-                        deltaZ = screenWp.z-currentWp.z;                        
+                        deltaZ = screenWp.z-currentWp.z;  
+                        hit = hitting(deltaZ,maxDeltaZ,ssr);
                         
-                        if(crossing(deltaZbefore,deltaZ)) {
+                        if(!hit && crossing(deltaZbefore,deltaZ)) {
                             currentWp -= subIncVec;
                         }
                     }
-                    
-                    if(!bRTHitFast) {
-                        currentWp += subIncVec*0.5;
-                        screenCoords = getScreenPosition(currentWp);
-                        depth = ReShade::GetLinearizedDepth(screenCoords.xy);
-                       
-                        screenWp = getWorldPosition(screenCoords.xy,depth);
-                        deltaZ = min(deltaZ,screenWp.z-currentWp.z);
-                    }
+                        
    
-                    if(bRTHitFast || abs(deltaZ)<=maxDeltaZ) {
-                        return float4(currentWp,RT_HIT+deltaZ);
+                    if(bRTHitFast || hit) {
+                        return float4(currentWp,RT_HIT+(!ssr && deltaZ<0?deltaZ+16/iRTCheckHitPrecision:deltaZ));
                     }
                 }
                 
@@ -1096,9 +1078,6 @@ namespace DH_UBER_RT {
                 }
                 giColor.rgb *= saturate(b*1.5*safePow(saturate(1.0-d/RESHADE_DEPTH_LINEARIZATION_FAR_PLANE),fGIDistancePower));                
                 
-                // Reduce light halo
-                giColor.rgb *= saturate(1.0+deltaZ*2);
-
             } else if(fSkyColor>0 && hitPosition.a==RT_HIT_SKY) {
                 giColor.rgb = getColor(screenCoords.xy).rgb*fSkyColor;
             } else if(hitPosition.a<=RT_MISSED) {
@@ -1111,8 +1090,6 @@ namespace DH_UBER_RT {
             }
             
             giColor.a = getBrightness(giColor.rgb);
-            // Use saturation
-            giColor.a *= 0.1+getPureness(giColor.rgb);
             
             mergedGiColor = max(giColor,mergedGiColor);
             
@@ -1134,6 +1111,12 @@ namespace DH_UBER_RT {
             mergedAO = 1.0;
         } else {
             mergedAO /= aoHits;
+        }
+        
+        if(fGIDarkAmplify>0) {
+            float3 hsv = RGBtoHSV(mergedGiColor.rgb);
+            hsv.z = saturate(hsv.z+fGIDarkAmplify);
+            mergedGiColor.rgb = HSVtoRGB(hsv);
         }
         
         float opacity = 1.0/iFrameAccu;
@@ -1237,7 +1220,6 @@ namespace DH_UBER_RT {
             [loop]
             for(delta.y=-iSmoothRadius;delta.y<=iSmoothRadius;delta.y++) {
                 
-                float2 ssrCurrentCoords = coords+delta*pixelSize*(firstPass ? iSmoothSSRStep : 1);
                 currentCoords = coords+delta*pixelSize*(firstPass ? iSmoothStep : 1);
                 
                 float dist = distance(0,delta);
@@ -1248,13 +1230,14 @@ namespace DH_UBER_RT {
                 float depth = ReShade::GetLinearizedDepth(currentCoords);
                 if(depth>fSkyDepth) continue;
                 
-                float4 curGiAo = getColorSamplerLod(sourceGISampler,currentCoords,firstPass ? (iSmoothStep-1.0)*0.5 : 0.0);
+                float4 curGiAo = getColorSamplerLod(sourceGISampler,currentCoords,firstPass ? log2(iSmoothStep) : 0.0);
+
                 float3 ssrColor = dist>iSmoothSSRRadius 
                     ? 0
-                    : getColorSamplerLod(sourceSSRSampler,ssrCurrentCoords, firstPass ? iSmoothSSRStep*0.5 : 0.0).rgb;
+                    : getColorSamplerLod(sourceSSRSampler,currentCoords, firstPass ? log2(iSmoothStep) : 0.0).rgb;
                 
                 // Distance weight | gi,ao,ssr 
-                float weight = safePow(1.0+iSmoothRadius/(dist+1),fSmoothDistPow);             
+                float weight = safePow(1.0+iSmoothRadius/(dist+1),fSmoothDistPow);
                 
                 { // Normal weight
                     float3 normal = getNormal(currentCoords);
@@ -1494,11 +1477,11 @@ namespace DH_UBER_RT {
 // TEHCNIQUES 
     
     technique DH_UBER_RT<
-        ui_label = "DH_UBER_RT 0.7.0";
+        ui_label = "DH_UBER_RT 0.8.0";
         ui_tooltip = 
             "_____________ DH_UBER_RT _____________\n"
             "\n"
-            " ver 0.7.0 (2023-06-07)  by AlucardDH\n"
+            " ver 0.8.0 (2023-06-13)  by AlucardDH\n"
             "\n"
             "______________________________________";
     > {
