@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// DH_UBER_RT 0.8.0 (2023-06-13)
+// DH_UBER_RT 0.9.0 (2023-06-15)
 //
 // This shader is free, if you paid for it, you have been ripped and should ask for a refund.
 //
@@ -414,7 +414,7 @@ namespace DH_UBER_RT {
         ui_min = 0; ui_max = 1.0;
         ui_step = 0.01;
         ui_tooltip = "Define the way reflections are blurred by rough surfaces";
-    > = 0.05;
+    > = 0.10;
 #endif
 
 // Denoising
@@ -489,7 +489,7 @@ namespace DH_UBER_RT {
         ui_min = 0.0; ui_max = 2.0;
         ui_step = 0.01;
         ui_tooltip = "Simple multiplier for the base image.";
-    > = 0.85;
+    > = 1.0;
         
     uniform float fGILightMerging <
         ui_type = "slider";
@@ -498,7 +498,7 @@ namespace DH_UBER_RT {
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
         ui_tooltip = "Define how much bright areas are affected by GI.";
-    > = 0.10;
+    > = 0.50;
     uniform float fGIDarkMerging <
         ui_type = "slider";
         ui_category = "Merging";
@@ -506,7 +506,7 @@ namespace DH_UBER_RT {
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
         ui_tooltip = "Define how much dark areas are affected by GI.";
-    > = 0.75;
+    > = 0.50;
     
     uniform float fGIFinalMerging <
         ui_type = "slider";
@@ -626,7 +626,7 @@ namespace DH_UBER_RT {
 
 #if ROUGHNESS
     float getRoughness(float2 coords) {
-        return abs(getColorSampler(roughnessSampler,coords).r-0.5)*2;
+        return getColorSampler(roughnessSampler,coords).r;
     }
 #endif
 
@@ -664,6 +664,21 @@ namespace DH_UBER_RT {
         return v;
     }
     
+    float3 randomTriple(float2 coords) {
+        float3 v = 0;
+#if TEX_NOISE
+        int2 offset = int2((framecount*random*SQRT2),(framecount*random*PI))%512;
+        float2 noiseCoords = ((offset+coords*BUFFER_SIZE)%512)/512;
+        v = (getColorSamplerLod(blueNoiseSampler,noiseCoords,0)-0.5)*2;
+#else
+        uint seed = getPixelIndex(coords,RENDER_SIZE);
+
+        v.x = randomValue(seed);
+        v.y = randomValue(seed);
+        v.z = randomValue(seed);
+#endif
+        return v;
+    }
     
     float3 getRayColor(float2 coords,float2 previousCoords) {
         float3 color = getColor(coords).rgb;
@@ -689,51 +704,49 @@ namespace DH_UBER_RT {
         float refB = getBrightness(refColor);
         
         float roughness = 0.0;
-
-        float tempA = 0;
-        float tempB = 0;
-        
+        float ws = 0;
+            
         float3 previousX = refColor;
         float3 previousY = refColor;
         [loop]
         for(int d = 1;d<=iRoughnessRadius;d++) {
+            float w = 1.0/safePow(d,0.5);
+            
             float3 color = getColor(float2(coords.x+ReShade::PixelSize.x*d,coords.y)).rgb;
-            float3 diff = previousX-color;
-            float r = maxOf3(diff)/safePow(d,0.5);
-            tempA += abs(r);
-            tempB = abs(r)>abs(tempB) ? r : tempB;
+            float3 diff = abs(previousX-color);
+            roughness += maxOf3(diff)*w;
+            ws += w;
             previousX = color;
             
             color = getColor(float2(coords.x,coords.y+ReShade::PixelSize.y*d)).rgb;
-            diff = previousY-color;
-            r = maxOf3(diff)/safePow(d,0.5);
-            tempA += abs(r);
-            tempB = abs(r)>abs(tempB) ? r : tempB;
+            diff = abs(previousY-color);
+            roughness += maxOf3(diff)*w;
+            ws += w;
             previousY = color;
         }
         previousX = refColor;
         previousY = refColor;
         [loop]
         for(int d = 1;d<=iRoughnessRadius;d++) {
+            float w = 1.0/safePow(d,0.5);
+            
             float3 color = getColor(float2(coords.x-ReShade::PixelSize.x*d,coords.y)).rgb;
-            float3 diff = previousX-color;
-            float r = maxOf3(diff)/safePow(d,0.5);
-            tempA += abs(r);
-            tempB = abs(r)>abs(tempB) ? r : tempB;
+            float3 diff = abs(previousX-color);
+            roughness += maxOf3(diff)*w;
+            ws += w;
             previousX = color;
             
             color = getColor(float2(coords.x,coords.y-ReShade::PixelSize.y*d)).rgb;
-            diff = previousY-color;
-            r = maxOf3(diff)/safePow(d,0.5);
-            tempA += abs(r);
-            tempB = abs(r)>abs(tempB) ? r : tempB;
+            diff = abs(previousY-color);
+            roughness += maxOf3(diff)*w;
+            ws += w;
             previousY = color;
         }
-        tempA /= iRoughnessRadius;
-        tempA *= sign(tempB);
-        roughness = tempA;
-
-        roughness = roughness/2+0.5;
+        
+        
+        roughness *= 4.0/iRoughnessRadius;
+        roughness *= safePow(refB,0.5);
+        roughness *= safePow(1.0-refB,2.0);
 
         outRoughness = float4(roughness,roughness,roughness,1.0);
     }
@@ -949,66 +962,6 @@ namespace DH_UBER_RT {
         int2 coordsInt = (coords * RENDER_SIZE)%2;
         return coordsInt.x+coordsInt.y*2;
     }
-    
-    void getPerpendicularVectors(float3 originalVector, out float3 perpendicularVector1, out float3 perpendicularVector2)
-    {
-        // Set the first perpendicular vector as the cross product of the original vector and the up vector (0, 1, 0)
-        perpendicularVector1 = cross(originalVector, float3(0, 1, 0));
-    
-        // If the original vector is parallel to the up vector, use the cross product with the right vector (1, 0, 0)
-        if (length(perpendicularVector1) < 0.001)
-        {
-            perpendicularVector1 = cross(originalVector, float3(1, 0, 0));
-        }
-    
-        // Normalize the first perpendicular vector
-        perpendicularVector1 = normalize(perpendicularVector1);
-    
-        // Calculate the second perpendicular vector by taking the cross product of the original vector and the first perpendicular vector
-        perpendicularVector2 = cross(originalVector, perpendicularVector1);
-        
-        // Normalize the second perpendicular vector
-        perpendicularVector2 = normalize(perpendicularVector2);
-    }
-    
-    float3 rotateVector(float3 vectorToRotate, float3 axis, float angle) {
-        // Normalize the axis vector
-        //axis = normalize(axis);
-    
-        // Calculate sine and cosine of the rotation angle
-        float cosTheta;
-        float sinTheta;
-        sincos(angle,sinTheta,cosTheta);
-    
-        // Calculate the dot product of the vector to rotate and the axis vector
-        float dotProduct = dot(vectorToRotate, axis);
-    
-        // Calculate the cross product of the vector to rotate and the axis vector
-        float3 crossProduct = cross(vectorToRotate, axis);
-    
-        // Perform the rotation using Rodrigues' rotation formula
-        float3 rotatedVector = vectorToRotate * cosTheta + crossProduct * sinTheta + axis * dotProduct * (1 - cosTheta);
-    
-        return rotatedVector;
-    }
-    
-
-    
-    float3 randomHemispehreVector(float2 coords,float3 normal,float variability) {
-
-        float2 v = (randomCouple(coords)-0.5)*PI;
-        v.x*=variability;
-        v.y*=2;
-        
-        float3 per1;
-        float3 per2;
-        getPerpendicularVectors(normal,per1,per2);
-        
-        float3 result = rotateVector(normal,per1,v.x);
-        result = rotateVector(result,per2,v.y);
-        return normalize(result);
-
-    }
 
     void PS_GILightPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outGI : SV_Target0) {
         
@@ -1052,7 +1005,7 @@ namespace DH_UBER_RT {
         int maxRays = 0;
         int rays = 0;
 #endif
-            float3 lightVector = randomHemispehreVector(coords+float2(0.1,0.05)*rays,refNormal,0.9);
+            float3 lightVector = normalize(randomTriple(coords+float2(0.1,0.05)*rays)-0.5);
             
             hitPosition = trace(refWp,lightVector,depth,false);
             if(RT_MISSED_FAST) {
@@ -1146,15 +1099,19 @@ namespace DH_UBER_RT {
             
             float3 normal = getNormal(coords);
             
+            float angleH = abs(dot(normal,normalize(targetWp)));
+                 
+                    
 #if ROUGHNESS
             if(bRoughness) {
                 float3 randomVector;
                 float roughness = getRoughness(coords);
-                float randomness = saturate(roughness*fRoughnessIntensity*10);
+                float randomness = roughness*fRoughnessIntensity*1000;
                 
-                float2 r = randomCouple(coords)-0.5;
-                lightVector = rotateVector(lightVector,normal,r.x*randomness);
-                lightVector = rotateVector(lightVector,normal,r.y*randomness);
+                randomness *= angleH;
+                
+                float3 r = randomTriple(coords)-0.5;
+                lightVector = (lightVector+r*randomness);
             }
 #endif
             //lightVector = normalize(lightVector);
@@ -1171,8 +1128,7 @@ namespace DH_UBER_RT {
             } else {
                 float3 screenCoords = getScreenPosition(hitPosition.xyz);
                 float3 color = getColorSampler(resultSampler,screenCoords.xy).rgb;
-                float angle = max(0.25,1.0-dot(normal,normalize(float3(coords-0.5,1))));
-                color*=angle;
+                color *=  max(0.25,1.0-angleH);
                 
                 if(bRTHitFast) {
                     float deltaZ = hitPosition.a-RT_HIT;
@@ -1385,10 +1341,12 @@ namespace DH_UBER_RT {
                 float avg = getBrightness(getColorSamplerLod(giSmoothPassSampler,float2(0.5,0.5),9.0).rgb);
                 darkMerging *= 1.0-avg/2.0;
             }
-            result += lerp(0,(result+0.1)*gi,(1.0-colorBrightness)*darkMerging*2.0);
+            float darkB = safePow(1.0-colorBrightness,3.0);
+            result += lerp(0,(result+0.1)*gi,darkB*darkMerging*4.0);
             
             // Light areas
-            result = result*fGILightMerging+lerp(result,(result+0.2)*gi,giBrightness*saturate(1.5-colorPureness)*colorBrightness*fGILightMerging);
+            float brightB = colorBrightness*pow(colorBrightness,0.5)*pow(1.0-colorBrightness,0.75);
+            result += lerp(0,gi,brightB*fGILightMerging);
             
             // Mixing
             float colorPreservation = saturate(safePow(colorBrightness*2.0-1.0,10*fGIFinalMerging));
@@ -1412,7 +1370,7 @@ namespace DH_UBER_RT {
             }
           
             
-            outResult = float4(result,1);
+            outResult = float4(saturate(result),1);
         }
     }
     
@@ -1477,11 +1435,11 @@ namespace DH_UBER_RT {
 // TEHCNIQUES 
     
     technique DH_UBER_RT<
-        ui_label = "DH_UBER_RT 0.8.0";
+        ui_label = "DH_UBER_RT 0.9.0";
         ui_tooltip = 
             "_____________ DH_UBER_RT _____________\n"
             "\n"
-            " ver 0.8.0 (2023-06-13)  by AlucardDH\n"
+            " ver 0.9.0 (2023-06-15)  by AlucardDH\n"
             "\n"
             "______________________________________";
     > {
