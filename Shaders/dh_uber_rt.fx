@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// DH_UBER_RT 0.9.0 (2023-06-15)
+// DH_UBER_RT 0.10.0 (2023-06-22)
 //
 // This shader is free, if you paid for it, you have been ripped and should ask for a refund.
 //
@@ -259,8 +259,7 @@ namespace DH_UBER_RT {
         ui_tooltip = "Define the length of the steps during ray tracing.\n"
                     "Lower=better performance, less quality\n"
                     "Higher=better detection of small geometry, less performances\n"
-                    "/!\\ HAS A VARIABLE INPACT ON PERFORMANCES\n"
-                    "DEPENDING ON 'Step multiply'";
+                    "/!\\ HAS A VARIABLE INPACT ON PERFORMANCES";
     > = 1000;
 
 #if !OPTIMIZATION_ONE_LOOP_RT
@@ -362,7 +361,7 @@ namespace DH_UBER_RT {
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
         ui_tooltip = "Protection of bright areas to avoid washed out highlights";
-    > = 0.10;
+    > = 0.30;
     
     uniform float fAODarkProtect <
         ui_type = "slider";
@@ -490,6 +489,16 @@ namespace DH_UBER_RT {
         ui_step = 0.01;
         ui_tooltip = "Simple multiplier for the base image.";
     > = 1.0;
+    
+    uniform float fGIHueBiais <
+        ui_type = "slider";
+        ui_category = "Merging";
+        ui_label = "GI Hue Biais";
+        ui_min = 0.0; ui_max = 1.0;
+        ui_step = 0.01;
+        ui_tooltip = "Define how much base color can take GI hue.";
+    > = 0.25;
+    
         
     uniform float fGILightMerging <
         ui_type = "slider";
@@ -669,7 +678,7 @@ namespace DH_UBER_RT {
 #if TEX_NOISE
         int2 offset = int2((framecount*random*SQRT2),(framecount*random*PI))%512;
         float2 noiseCoords = ((offset+coords*BUFFER_SIZE)%512)/512;
-        v = (getColorSamplerLod(blueNoiseSampler,noiseCoords,0)-0.5)*2;
+        v = (getColorSamplerLod(blueNoiseSampler,noiseCoords,0).rgb-0.5)*2;
 #else
         uint seed = getPixelIndex(coords,RENDER_SIZE);
 
@@ -940,9 +949,9 @@ namespace DH_UBER_RT {
             
             deltaZbefore = deltaZ;
             
-            stepRatio = 1.01+depth;
+			stepRatio = 1.3+depth;
             if(ssr && bSSRHQ && stepLength>1.5) {
-                stepRatio = 1.0;
+                stepRatio = 1.001;
             }
             stepLength *= stepRatio;
             incrementVector *= stepRatio;
@@ -1274,8 +1283,8 @@ namespace DH_UBER_RT {
         
         ao = saturate(1.0-(1.0-ao)*fAOMultiplier);
         
-        float lightAo = lerp(ao,1.0,colorBrightness*fAOLightProtect*2.0); 
-        float darkAo = lerp(ao,1.0,(1.0-colorBrightness)*fAODarkProtect*2.0);        
+        float lightAo = lerp(ao,1.0,saturate(colorBrightness*fAOLightProtect*2.0)); 
+        float darkAo = lerp(ao,1.0,saturate((1.0-colorBrightness)*fAODarkProtect*2.0));
         ao = max(lightAo,darkAo);
         
         return ao;
@@ -1330,6 +1339,15 @@ namespace DH_UBER_RT {
             colorBrightness = getBrightness(color);
             colorPureness = getPureness(color);
             
+            { // Apply hue to source color 
+                float3 colorHSV = RGBtoHSV(color);
+                float colorS = colorHSV.y;
+                float3 giHSV = RGBtoHSV(gi);
+                colorHSV.x = giHSV.x;
+                colorHSV.y = giHSV.y;
+                color = lerp(color,HSVtoRGB(colorHSV),saturate(5.0*fGIHueBiais*giBrightness*(1.0-colorBrightness*0.8)*(1.0-colorS*0.5)*(giHSV.y)));
+            }
+            
             // Base color
             float3 result = color;
             
@@ -1345,7 +1363,7 @@ namespace DH_UBER_RT {
             result += lerp(0,(result+0.1)*gi,darkB*darkMerging*4.0);
             
             // Light areas
-            float brightB = colorBrightness*pow(colorBrightness,0.5)*pow(1.0-colorBrightness,0.75);
+            float brightB = colorBrightness*safePow(colorBrightness,0.5)*safePow(1.0-colorBrightness,0.75);
             result += lerp(0,gi,brightB*fGILightMerging);
             
             // Mixing
@@ -1435,11 +1453,11 @@ namespace DH_UBER_RT {
 // TEHCNIQUES 
     
     technique DH_UBER_RT<
-        ui_label = "DH_UBER_RT 0.9.0";
+        ui_label = "DH_UBER_RT 0.10.0";
         ui_tooltip = 
             "_____________ DH_UBER_RT _____________\n"
             "\n"
-            " ver 0.9.0 (2023-06-15)  by AlucardDH\n"
+            " ver 0.10.0 (2023-06-22)  by AlucardDH\n"
             "\n"
             "______________________________________";
     > {
