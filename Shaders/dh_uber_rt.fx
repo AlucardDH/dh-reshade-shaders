@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// DH_UBER_RT 0.10.0 (2023-06-22)
+// DH_UBER_RT 0.11.0 (2023-07-04)
 //
 // This shader is free, if you paid for it, you have been ripped and should ask for a refund.
 //
@@ -220,7 +220,7 @@ namespace DH_UBER_RT {
         ui_category = "Common RT";
         ui_type = "slider";
         ui_label = "RT Hit precision";
-        ui_min = 1; ui_max = 16;
+        ui_min = 1; ui_max = 32;
         ui_step = 1;
         ui_tooltip = "Lower=better performance, less quality\n"
                     "Higher=better detection of small geometry, less performances\n"
@@ -248,7 +248,7 @@ namespace DH_UBER_RT {
                     "Lower=less ghosting in motion, more noise\n"
                     "Higher=more ghosting in motion, less noise\n"
                     "/!\\ If motion detection is disable, decrease this to 3 except if you have a very high fps";
-    > = 8;
+    > = 6;
     
     uniform float fRayStepPrecision <
         ui_type = "slider";
@@ -413,7 +413,7 @@ namespace DH_UBER_RT {
         ui_min = 0; ui_max = 1.0;
         ui_step = 0.01;
         ui_tooltip = "Define the way reflections are blurred by rough surfaces";
-    > = 0.10;
+    > = 0.05;
 #endif
 
 // Denoising
@@ -663,7 +663,7 @@ namespace DH_UBER_RT {
 #if TEX_NOISE
         int2 offset = int2((framecount*random*SQRT2),(framecount*random*PI))%512;
         float2 noiseCoords = ((offset+coords*BUFFER_SIZE)%512)/512;
-        v = (getColorSamplerLod(blueNoiseSampler,noiseCoords,0).rg-0.5)*2;
+        v = abs((getColorSamplerLod(blueNoiseSampler,noiseCoords,0).rg-0.5)*2.0);
 #else
         uint seed = getPixelIndex(coords,RENDER_SIZE);
 
@@ -678,7 +678,7 @@ namespace DH_UBER_RT {
 #if TEX_NOISE
         int2 offset = int2((framecount*random*SQRT2),(framecount*random*PI))%512;
         float2 noiseCoords = ((offset+coords*BUFFER_SIZE)%512)/512;
-        v = (getColorSamplerLod(blueNoiseSampler,noiseCoords,0).rgb-0.5)*2;
+        v = abs((getColorSamplerLod(blueNoiseSampler,noiseCoords,0).rgb-0.5)*2.0);
 #else
         uint seed = getPixelIndex(coords,RENDER_SIZE);
 
@@ -833,8 +833,12 @@ namespace DH_UBER_RT {
     }
 #endif
 
-    bool hitting(float deltaZ, float maxDeltaZ, bool ssr) {
-        return (deltaZ>=0 && deltaZ<=maxDeltaZ) || (deltaZ<0 && -deltaZ<=maxDeltaZ+(ssr?0:16/iRTCheckHitPrecision));
+    bool hittingSSR(float deltaZ, float maxDeltaZ) {
+        return (deltaZ>=0 && deltaZ<=maxDeltaZ) || (deltaZ<0 && -deltaZ<=maxDeltaZ);
+    }
+    
+    bool hittingGI(float3 screenWp, float3 currentWp, float maxDeltaZ) {
+        return distance(screenWp,currentWp)<=maxDeltaZ;
     }
     
     bool crossing(float deltaZbefore, float deltaZ) {
@@ -854,6 +858,8 @@ namespace DH_UBER_RT {
         
         float traceDistance = 0;
         float3 currentWp = refWp;
+        
+        float3 refNormal = getNormal(getScreenPosition(currentWp).xy);
 
         float deltaZ = 0.0;
         float deltaZbefore = 0.0;
@@ -877,6 +883,8 @@ namespace DH_UBER_RT {
         float depth;
         float ratio;
         float maxDeltaZ = max(0.1,1.0/iRTCheckHitPrecision);
+        
+        int maxPrecision = ssr ? min(8,iRTCheckHitPrecision) : iRTCheckHitPrecision;
         
         [loop]
         do {
@@ -903,8 +911,7 @@ namespace DH_UBER_RT {
                 if(lastSky.x!=0.0) {
                     return float4(lastSky,RT_HIT_SKY);
                 }
-                    
-                currentWp -= incrementVector;
+
                 return RT_MISSED;
                 
             } else if(outSource) {
@@ -914,11 +921,12 @@ namespace DH_UBER_RT {
                 if(crossed) {
                     bool hit = false;                   
                         
-                    currentWp -= incrementVector; 
+                    currentWp -= incrementVector;
+
                     float3 subIncVec = incrementVector;
                     
                     [loop]
-                    for(int i=0;!hit && i<iRTCheckHitPrecision;i++) {
+                    for(int i=0;!hit && i<maxPrecision;i++) {
                         subIncVec *= 0.5;
                         currentWp += subIncVec;
                         
@@ -927,7 +935,9 @@ namespace DH_UBER_RT {
                        
                         screenWp = getWorldPosition(screenCoords.xy,depth);
                         deltaZ = screenWp.z-currentWp.z;  
-                        hit = hitting(deltaZ,maxDeltaZ,ssr);
+                        hit = ssr
+                            ? hittingSSR(deltaZ,maxDeltaZ)
+                            : hittingGI(screenWp,currentWp,traceDistance*10);
                         
                         if(!hit && crossing(deltaZbefore,deltaZ)) {
                             currentWp -= subIncVec;
@@ -935,24 +945,30 @@ namespace DH_UBER_RT {
                     }
                         
    
-                    if(bRTHitFast || hit) {
+                    if((!ssr && bRTHitFast) || hit) {
                         return float4(currentWp,RT_HIT+(!ssr && deltaZ<0?deltaZ+16/iRTCheckHitPrecision:deltaZ));
                     }
                 }
                 
                 
             } else {
-                outSource = true;
+                float3 currentNormal = getNormal(screenCoords.xy);
+                float dt = dot(currentNormal,refNormal);
+                outSource = dt<1.0;
             }
             
             firstStep = false;
             
             deltaZbefore = deltaZ;
             
-			stepRatio = 1.3+depth;
+
+            float2 r = randomCouple(screenCoords.xy);
+            stepRatio = 1.00+depth+r.x;
+            
             if(ssr && bSSRHQ && stepLength>1.5) {
                 stepRatio = 1.001;
             }
+            
             stepLength *= stepRatio;
             incrementVector *= stepRatio;
 
@@ -1083,7 +1099,7 @@ namespace DH_UBER_RT {
         
         float opacity = 1.0/iFrameAccu;
             
-        mergedGiColor.rgb = max(mergedGiColor.rgb,previousFrame.rgb*(1.0-opacity));
+        mergedGiColor.rgb = max(mergedGiColor.rgb,previousFrame.rgb*max(0.9,1.0-opacity));
         mergedAO = lerp(previousFrame.a,mergedAO,opacity);
         
         outGI = float4(mergedGiColor.rgb,mergedAO);
@@ -1453,11 +1469,11 @@ namespace DH_UBER_RT {
 // TEHCNIQUES 
     
     technique DH_UBER_RT<
-        ui_label = "DH_UBER_RT 0.10.0";
+        ui_label = "DH_UBER_RT 0.11.0";
         ui_tooltip = 
             "_____________ DH_UBER_RT _____________\n"
             "\n"
-            " ver 0.10.0 (2023-06-22)  by AlucardDH\n"
+            " ver 0.11.0 (2023-07-04)  by AlucardDH\n"
             "\n"
             "______________________________________";
     > {
