@@ -7,7 +7,7 @@ namespace DHUniformityCorrection {
 	uniform bool bSolidColor <
 	    ui_category = "Debug";
 		ui_label = "Solid color";
-	> = false;
+	> = true;
 	
 	uniform float fSolidColor <
 	    ui_category = "Debug";
@@ -18,7 +18,7 @@ namespace DHUniformityCorrection {
 	    ui_step = 0.1;
 	> = 0.5;
 	
-	uniform bool bGreuScale <
+	uniform bool bGreyScale <
 	    ui_category = "Correction";
 		ui_label = "Grey scale";
 	> = true;
@@ -37,12 +37,12 @@ namespace DHUniformityCorrection {
         ui_type = "combo";
         ui_label = "Method";
         ui_items = "Additive\0Additive normalized\0Brightness proportional\0";
-    > = 0;
+    > = 2;
 
 //// textures
 
-	texture uniformityDefectTex < source = "dh_uniformity_correction.bmp"; > { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; };
-	sampler uniformityDefectSampler { Texture = uniformityDefectTex; };
+	texture uniformityDefectTex < source="dh_uniformity_correction.png"; > { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; };
+	sampler uniformityDefectSampler { Texture=uniformityDefectTex; };
 
 //// Functions
 
@@ -59,7 +59,7 @@ namespace DHUniformityCorrection {
 		}
 		
 		float3 defect = tex2D(uniformityDefectSampler,coords).rgb;
-		if(bGreuScale) {
+		if(bGreyScale) {
 			defect = max(defect.r,max(defect.g,defect.b));
 		}
 	
