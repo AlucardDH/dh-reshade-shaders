@@ -1,12 +1,13 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// DH_UBER_RT 0.12.0 (2023-07-10)
+// DH_UBER_RT 0.13.0 (2023-07-14)
 //
 // This shader is free, if you paid for it, you have been ripped and should ask for a refund.
 //
 // This shader is developed by AlucardDH (Damien Hembert)
 //
-// Get more here : https://github.com/AlucardDH/dh-reshade-shaders
+// Get more here : https://alucarddh.github.io
+// Join my Discord server for news, request, bug reports or help : https://discord.gg/V9HgyBRgMW
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////
 #include "Reshade.fxh"
@@ -55,6 +56,7 @@
 #define DEBUG_NORMAL 6
 #define DEBUG_SKY 7
 #define DEBUG_MOTION 8
+#define DEBUG_AMBIENT 9
 
 #define RT_HIT 1.0
 #define RT_HIT_SKY -0.5
@@ -87,8 +89,10 @@
 #define getColorSampler(s,c) tex2Dlod(s,float4((c).xy,0,0))
 #define maxOf3(a) max(max(a.x,a.y),a.z)
 #define minOf3(a) min(min(a.x,a.y),a.z)
-#define getBrightness(color) maxOf3(color)
-#define getPureness(color) (maxOf3(color)-minOf3(color))
+#define avgOf3(a) (((a).x+(a).y+(a).z)/3.0)
+#define getBrightness(color) maxOf3((color))
+#define getPureness(color) (maxOf3((color))-minOf3((color)))
+#define CENTER float2(0.5,0.5)
 //////////////////////////////////////////////////////////////////////////////
 
 texture texMotionVectors { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RG16F; };
@@ -105,6 +109,12 @@ namespace DH_UBER_RT {
     sampler blueNoiseSampler { Texture = blueNoiseTex;  AddressU = REPEAT;  AddressV = REPEAT;  AddressW = REPEAT;};
 #endif
 
+    texture ambientTex { Width = 1; Height = 1; Format = RGBA16F; };
+    sampler ambientSampler { Texture = ambientTex; };   
+
+    texture previousAmbientTex { Width = 1; Height = 1; Format = RGBA16F; };
+    sampler previousAmbientSampler { Texture = previousAmbientTex; }; 
+    
     texture normalTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8; };
     sampler normalSampler { Texture = normalTex; };
     
@@ -173,7 +183,7 @@ namespace DH_UBER_RT {
         ui_category = "Debug";
         ui_type = "combo";
         ui_label = "Display";
-        ui_items = "Output\0GI\0AO\0SSR\0Roughness\0Depth\0Normal\0Sky\0Motion\0";
+        ui_items = "Output\0GI\0AO\0SSR\0Roughness\0Depth\0Normal\0Sky\0Motion\0Ambient light\0";
         ui_tooltip = "Debug the intermediate steps of the shader";
     > = 0;
     
@@ -287,13 +297,27 @@ namespace DH_UBER_RT {
     > = 0.2;
 #endif
 
+    uniform float fNormalRoughness <
+        ui_type = "slider";
+        ui_category = "Common RT";
+        ui_label = "Normal roughness";
+        ui_min = 0.000; ui_max = 1.0;
+        ui_step = 0.001;
+        ui_tooltip = "";
+    > = 0.15;
+
 
 // AMBIENT LIGHT 
 
     uniform bool bRemoveAmbient <
         ui_category = "Ambient light";
         ui_label = "Remove Source Ambient light";
-    > = false;
+    > = true;
+    
+    uniform bool bRemoveAmbientAuto <
+        ui_category = "Ambient light";
+        ui_label = "Auto ambient color";
+    > = true;
 
     uniform float3 cSourceAmbientLightColor <
         ui_type = "color";
@@ -305,10 +329,16 @@ namespace DH_UBER_RT {
         ui_type = "slider";
         ui_category = "Ambient light";
         ui_label = "Strength";
-        ui_min = 0; ui_max = 2.0;
+        ui_min = 0; ui_max = 1.0;
         ui_step = 0.001;
     > = 1.0;
     
+    uniform bool bRemoveAmbientPreserveBrightness <
+        ui_category = "Ambient light";
+        ui_label = "Preserve brighthness";
+    > = false;
+    
+/// ADD
     uniform bool bAddAmbient <
         ui_category = "Ambient light";
         ui_label = "Add Ambient light";
@@ -316,9 +346,9 @@ namespace DH_UBER_RT {
 
     uniform float3 cTargetAmbientLightColor <
         ui_type = "color";
-        ui_category = "Ambient light";
+        ui_category = "Add ambient light";
         ui_label = "Target Ambient light color";
-    > = float3(10.0,7.0,0.0)/255.0;
+    > = float3(13.0,13.0,13.0)/255.0;
     
     
 // GI
@@ -339,7 +369,7 @@ namespace DH_UBER_RT {
         ui_min = 0; ui_max = 1.0;
         ui_step = 0.01;
         ui_tooltip = "Brighten dark colors, useful in dark corners";
-    > = 0.1;
+    > = 0.20;
     
     uniform float fGIBounce <
         ui_type = "slider";
@@ -381,7 +411,7 @@ namespace DH_UBER_RT {
         ui_type = "slider";
         ui_category = "GI";
         ui_label = "General intensity";
-        ui_min = 0; ui_max = 1.0;
+        ui_min = 0; ui_max = 2.0;
         ui_step = 0.01;
         ui_tooltip = "Define how much the whole image is affected by GI.";
     > = 1.0;
@@ -446,16 +476,9 @@ namespace DH_UBER_RT {
         ui_category = "SSR";
         ui_label = "Enable SSR";
         ui_tooltip = "Toggle SSR";
-    > = true;
+    > = false;
     
 #if ROUGHNESS
-    uniform bool bRoughness <
-        ui_type = "slider";
-        ui_category = "SSR";
-        ui_label = "Roughness";
-        ui_tooltip = "Tries to generate a roughness map of the image to have different type of reflections for SSR"
-                    "/!\\ HAS A VAIRABLE INPACT ON PERFORMANCES";
-    > = true;
 
     uniform int iRoughnessRadius <
         ui_type = "slider";
@@ -466,14 +489,6 @@ namespace DH_UBER_RT {
         ui_tooltip = "Define the max distance of roughness computation.\n"
                     "/!\\ HAS A BIG INPACT ON PERFORMANCES";
     > = 1;
-    uniform float fRoughnessIntensity <
-        ui_type = "slider";
-        ui_category = "SSR";
-        ui_label = "Roughness blur";
-        ui_min = 0; ui_max = 1.0;
-        ui_step = 0.01;
-        ui_tooltip = "Define the way reflections are blurred by rough surfaces";
-    > = 0.05;
     
     uniform float fMergingRoughness <
         ui_type = "slider";
@@ -482,7 +497,7 @@ namespace DH_UBER_RT {
         ui_min = 0.001; ui_max = 1.0;
         ui_step = 0.001;
         ui_tooltip = "Define how much the roughness decrease reflection intensity";
-    > = 0.75;
+    > = 1.0;
 #endif
 
     uniform float fMergingSSR <
@@ -492,7 +507,7 @@ namespace DH_UBER_RT {
         ui_min = 0; ui_max = 1.0;
         ui_step = 0.001;
         ui_tooltip = "Define this intensity of the Screan Space Reflection.";
-    > = 0.3;
+    > = 0.25;
 
 // Denoising
     uniform int iSmoothRadius <
@@ -525,17 +540,6 @@ namespace DH_UBER_RT {
         ui_step = 0.001;
         ui_tooltip = "During denoising, give more importance to close of far pixels";
     > = 3.0;
-
-    uniform float fNormalWeight <
-        ui_type = "slider";
-        ui_category = "Denoising";
-        ui_label = "Normal weight";
-        ui_min = 0; ui_max = 1.0;
-        ui_step = 0.01;
-        ui_tooltip = "During denoising, give more importance to pixels in the same orientation\n"
-                    "Higher will make GI less blurry\n"
-                    "Lower will make curved geometry smoother";
-    > = 0.50;
     
     // Merging
         
@@ -610,8 +614,34 @@ namespace DH_UBER_RT {
         return result;
     }
     
+#if ROUGHNESS
+    bool isRoughnessEnabled() {
+        return fNormalRoughness>0 || bSSR;
+    }
+    
+    float getRoughness(float2 coords) {
+        if(!isRoughnessEnabled()) {
+            return 0;
+        }
+        return getColorSampler(roughnessSampler,coords).r;
+    }
+    
+#else
+    bool isRoughnessEnabled() {
+        return false;
+    }
+    
+    float getRoughness(float2 coords) {
+        return 0;
+    }
+#endif
+    
     float3 getWorldPositionForNormal(float2 coords) {
         float depth = ReShade::GetLinearizedDepth(coords);
+        if(fNormalRoughness>0) {
+            float r = getRoughness(coords);
+            depth += r*(depth)*fNormalRoughness*0.1;
+        }
         float3 result = float3((coords-0.5)*depth,depth);
         if(depth<fWeaponDepth) {
             result.z /= RESHADE_DEPTH_LINEARIZATION_FAR_PLANE;
@@ -634,11 +664,6 @@ namespace DH_UBER_RT {
     }
 
 
-#if ROUGHNESS
-    float getRoughness(float2 coords) {
-        return getColorSampler(roughnessSampler,coords).r;
-    }
-#endif
 
 
 // Vector operations
@@ -693,6 +718,10 @@ namespace DH_UBER_RT {
     float3 getRayColor(float2 coords) {
         return getColorSampler(rayColorSampler,coords).rgb;
     }
+    
+    bool isEmpty(float3 v) {
+        return maxOf3(v)==0;
+    }
 
 // PS
 
@@ -704,7 +733,7 @@ namespace DH_UBER_RT {
 
 #if ROUGHNESS
     void PS_RoughnessPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outRoughness : SV_Target0) {
-        if(!bSSR || !bRoughness || fMergingSSR==0.0) discard;
+        if(!isRoughnessEnabled()) discard;
         
         float3 refColor = getColor(coords).rgb;            
         float refB = getBrightness(refColor);
@@ -758,6 +787,60 @@ namespace DH_UBER_RT {
     }
 #endif
 
+    void PS_SavePreviousAmbientPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outAmbient : SV_Target0) {
+        outAmbient = getColorSampler(ambientSampler,CENTER);
+    }
+    
+    void PS_AmbientPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outAmbient : SV_Target0) {
+        if(!bRemoveAmbient || !bRemoveAmbientAuto) discard;
+
+        float3 previous = getColorSampler(previousAmbientSampler,CENTER).rgb;
+        float3 result = previous;
+        float b = getBrightness(result);
+        bool first = false;
+        if(b==0) {
+            result = 1.0;
+            first = true;
+        }
+        if(framecount%60==0) {
+            result = 1.0;
+        }
+        
+        float bestB = b;
+        
+        float2 currentCoords = 0;
+        float2 bestCoords = CENTER;
+        float2 rand = randomCouple(coords);
+        
+        float2 size = BUFFER_SIZE;
+        float stepSize = BUFFER_WIDTH/16.0;
+        float2 numSteps = size/(stepSize+1);
+        
+            
+        //float2 rand = randomCouple(currentCoords);
+        for(int it=0;it<=4 && stepSize>=1;it++) {
+            float2 stepDim = stepSize/BUFFER_SIZE;
+        
+            for(currentCoords.x=bestCoords.x-stepDim.x*(numSteps.x/2);currentCoords.x<=bestCoords.x+stepDim.x*(numSteps.x/2);currentCoords.x+=stepDim.x) {
+                for(currentCoords.y=bestCoords.y-stepDim.y*(numSteps.y/2);currentCoords.y<=bestCoords.y+stepDim.y*(numSteps.y/2);currentCoords.y+=stepDim.y) {
+                    float3 color = getColor(currentCoords+rand*stepDim).rgb;
+                    b = getBrightness(color);
+                    if(b>0.1 && b<bestB) {
+                        result = min(result,color);
+                        bestB = b;
+                    }
+                }
+            }
+            size = stepSize;
+            numSteps = 8;
+            stepSize = size.x/8;
+        }
+        
+        float opacity = b==1 ? 0 : (0.01+getPureness(result))*0.5;
+        outAmbient = float4(result,first ? 1 : opacity);
+        
+    }
+
     void PS_NormalPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outNormal : SV_Target0) {
         
         float3 offset = float3(ReShade::PixelSize, 0.0);
@@ -779,6 +862,48 @@ namespace DH_UBER_RT {
         
     }
     
+    
+    float3 getRemovedAmbiantColor() {
+        if(bRemoveAmbientAuto) {
+            float3 color = getColorSampler(ambientSampler,float2(0.5,0.5)).rgb;
+            color += getBrightness(color);
+            return color;
+        } else {
+            return cSourceAmbientLightColor;
+        }
+    }
+    
+    float3 filterAmbiantLight(float3 sourceColor) {
+        float3 color = sourceColor;
+        if(bRemoveAmbient) {
+            float3 colorHSV = RGBtoHSV(color);
+            float3 ral = getRemovedAmbiantColor();
+            float3 removedTint = ral - minOf3(ral); 
+            float3 sourceTint = color - minOf3(color);
+            
+            float hueDist = maxOf3(abs(removedTint-sourceTint));
+            
+            float removal = saturate(1.0-hueDist*saturate(colorHSV.y+colorHSV.z));
+         color -= removedTint*removal;
+            color = saturate(color);
+            
+            if(bRemoveAmbientPreserveBrightness) {
+                float sB = getBrightness(sourceColor);
+                float nB = getBrightness(color);
+                
+                color += sB-nB;
+            }
+            
+            color = lerp(sourceColor,color,fSourceAmbientIntensity);
+            
+            if(bAddAmbient) {
+                float b = getBrightness(color);
+                color = saturate(color+pow(1.0-b,4.0)*cTargetAmbientLightColor);
+            }
+        }
+        return color;
+    }
+    
     void PS_RayColorPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outColor : SV_Target0) {
         
         float refDepth = ReShade::GetLinearizedDepth(coords);
@@ -798,11 +923,17 @@ namespace DH_UBER_RT {
                 float depth = ReShade::GetLinearizedDepth(currentCoords);
                 float depthDiff = abs(depth-refDepth);
                 if(depthDiff<=0.1*refDepth) {
-                    float3 c = getColorSampler(resultSampler,(currentCoords+previousDelta)).rgb;
-                    float score = getPureness(c)+getBrightness(c);
+                    float3 color = getColor(currentCoords).rgb;
+                    
+                    color = filterAmbiantLight(color);
+                    
+                    float b = getBrightness(color);
+                    float p = getPureness(color);                    
+                    
+                    float score = (getPureness(color)+safePow(b,3.0))*(b==1 && p==0?0:1);
 
                     if(score>maxScore) {
-                        result = c;
+                        result = color;
                         maxScore = score;
                         resultCount = 1.0;
                     }
@@ -820,7 +951,7 @@ namespace DH_UBER_RT {
     }
 
     bool hittingSSR(float deltaZ, float maxDeltaZ) {
-        return (deltaZ>=0 && deltaZ<=maxDeltaZ) || (deltaZ<0 && -deltaZ<=maxDeltaZ);
+        return (deltaZ>=0 && deltaZ<=maxDeltaZ) || (deltaZ<=0 && -deltaZ<=maxDeltaZ);
     }
     
     bool hittingGI(float3 screenWp, float3 currentWp, float maxDeltaZ) {
@@ -936,6 +1067,10 @@ namespace DH_UBER_RT {
                     } else if(maxOf3(abs(crossedWp))==0){
                         crossedWp = currentWp-subIncVec;
                     }
+                    
+                    // Stop when vector smaller than 1px
+                    float3 a = abs(incrementVector);
+                    if(a.x<1 && a.y<1) break;
                 }
                 
                 
@@ -1028,8 +1163,13 @@ namespace DH_UBER_RT {
             
             float d = distance(hitPosition.xyz,refWp);
             
+            float3 normal = getNormal(screenCoords.xy);
+            float orientationTarget = dot(lightVector,normal);
+            float orientationSource = dot(lightVector,-refNormal);
+                
+            
             float4 giColor;  
-			if(hitPosition.a==RT_HIT_SKY) {
+            if(hitPosition.a==RT_HIT_SKY) {
                 giColor.rgb = getColor(screenCoords.xy).rgb*fSkyColor;
             } else if(hitPosition.a>=0 || (maxOf3(abs(hitPosition.rgb))>0)) {
                 hits+=1.0;
@@ -1044,6 +1184,12 @@ namespace DH_UBER_RT {
                 
                 giColor.rgb *= saturate(b*1.5*safePow(saturate(1.0-d/RESHADE_DEPTH_LINEARIZATION_FAR_PLANE),fGIDistancePower));               
                 
+                    
+                // Light hit orientation
+                giColor.rgb *= saturate(0.25+saturate(orientationSource)*4);
+                
+                giColor.rgb *= saturate(0.5+saturate(orientationTarget)*3);
+                
             } else {
                 giColor.rgb = 0;
                 missGiColor = previousFrame.rgb;
@@ -1056,6 +1202,7 @@ namespace DH_UBER_RT {
             if(d<iAODistance*depth && depth>=fWeaponDepth && hitPosition.a>=0) {
                 aoHits++;
                 float ao = deltaZ<0 ? 0 : d/(iAODistance*depth);
+                //ao += 1.0-saturate(orientationSource);
                 mergedAO += saturate(ao);
             }
                 
@@ -1075,7 +1222,7 @@ namespace DH_UBER_RT {
         
         if(fGIDarkAmplify>0) {
             float3 hsv = RGBtoHSV(mergedGiColor.rgb);
-            hsv.z = saturate(hsv.z+fGIDarkAmplify);
+            hsv.z += fGIDarkAmplify;
             mergedGiColor.rgb = HSVtoRGB(hsv);
         }
         
@@ -1104,34 +1251,20 @@ namespace DH_UBER_RT {
     
             float3 lightVector = reflect(targetWp,targetNormal)*0.1;
             
-            float3 normal = getNormal(coords);
             
-            float angleH = abs(dot(normal,normalize(targetWp)));
+            float angleH = abs(dot(targetNormal,normalize(targetWp)));
             
             float opacity = 1;
-                
-#if ROUGHNESS
-            if(bRoughness) {
-                float3 randomVector;
-                float roughness = getRoughness(coords);
-                float randomness = roughness*fRoughnessIntensity*1000;
-                
-                randomness *= angleH;
-                opacity = randomness;
-                
-                float3 r = randomTriple(coords)-0.5;
-                lightVector = (lightVector+r*randomness);
-            }
-#endif
-            //lightVector = normalize(lightVector);
             
             float4 hitPosition = trace(targetWp,lightVector,depth,true,false);
-
-            float2 previousCoords = getPreviousCoords(coords);
-                
-            opacity *= distance(targetWp,hitPosition.xyz);
-            outColor = float4(getScreenPosition(hitPosition.xyz),saturate(opacity));
+            
+            if(isEmpty(hitPosition.xyz)) {
+                outColor = 0.0;
+            } else {
+                outColor = float4(getScreenPosition(hitPosition.xyz),hitPosition.a==RT_MISSED ? 0.5 : 1);
+            }
         }
+            
     }
     
     void smooth(
@@ -1148,29 +1281,7 @@ namespace DH_UBER_RT {
             return;
         }
         
-        float3 refNormal = getNormal(coords);
-        float4 refSSR = firstPass ? getColorSampler(sourceSSRSampler,coords) : 0;
-        bool foundRefSSR = refSSR.a>0;
-        if(firstPass) {
-            for(int i=1;!foundRefSSR && i<iSmoothRadius;i++) {
-                refSSR = getColorSampler(sourceSSRSampler,coords+pixelSize.xz*i);
-                foundRefSSR = refSSR.a>0;
-    
-                if(!foundRefSSR) {
-                    refSSR = getColorSampler(sourceSSRSampler,coords-pixelSize.xz*i);
-                    foundRefSSR = refSSR.a>0;
-                }
-                if(!foundRefSSR) {
-                    refSSR = getColorSampler(sourceSSRSampler,coords+pixelSize.zy*i);
-                    foundRefSSR = refSSR.a>0;
-                }
-                if(!foundRefSSR) {
-                    refSSR = getColorSampler(sourceSSRSampler,coords-pixelSize.zy*i);
-                    foundRefSSR = refSSR.a>0;
-                }
-            }
-        }
-        
+        float3 refNormal = getNormal(coords);        
          
         float4 giAo = 0;
         float weightSum = 0;
@@ -1209,8 +1320,9 @@ namespace DH_UBER_RT {
                 { // Normal weight
                     float3 normal = getNormal(currentCoords);
                     float3 t = normal-refNormal;
+                    float diffNorm = length(t);
                     float dist2 = max(dot(t,t), 0.0);
-                    float nw = min(exp(-(dist2)/(1.0-fNormalWeight)), 1.0);
+                    float nw = min(exp(-(dist2)/(1.0-saturate(diffNorm*10))), 1.0);
                     
                     weight *= nw*nw;
                 }
@@ -1236,14 +1348,12 @@ namespace DH_UBER_RT {
                     currentCoords = coords+delta*pixelSize.xy;
                     float4 ssrColor = getColorSampler(sourceSSRSampler,currentCoords);
                     
-                    if(maxOf3(ssrColor.rgb)>0) {
-                        if(firstPass && foundRefSSR) {
-                            float3 diffColor = abs(ssrColor.rgb-refSSR.rgb);
-                            weight /= 0.00001+maxOf3(diffColor);
-                        }
-                        ssr += ssrColor * weight;
-                        ssrWeightSum += weight;
+                    if(firstPass) {
+                        weight *= ssrColor.a;
                     }
+                    
+                    ssr += ssrColor * weight;
+                    ssrWeightSum += weight;
                 }
                         
             } // end for y
@@ -1259,18 +1369,22 @@ namespace DH_UBER_RT {
             float opacity = 1.0/iFrameAccu;
             outGI = lerp(previousPass,giAo,opacity);
             
-            if(maxOf3(ssr.rgb)>0) {
+            if(bSSR) {
                 previousPass = getColorSampler(ssrAccuSampler,previousCoords);
-                previousCoords = getPreviousCoords(ssr.xy);
-                if(previousPass.a==0) {
-                    opacity = 1;
-                }
-                ssr.rgb = getColorSampler(resultSampler,previousCoords).rgb;
+                    
+                if(maxOf3(ssr.rgb)>0) {
                 
-                outSSR = float4(lerp(previousPass.rgb,ssr.rgb,0.001+saturate(opacity-ssr.a*0.1)),1.0);  
+                    float3 stableColor = getColor(ssr.xy).rgb;
+                                        
+                    ssr.xy = getPreviousCoords(ssr.xy);
+                    float3 previousColor = getColorSampler(resultSampler,ssr.xy).rgb;                   
+                    
+                    outSSR = float4(lerp(previousPass.rgb,previousColor,opacity),1);//float4(lerp(previousPass.rgb,ssr.rgb,0.001+saturate(opacity-ssr.a*0.1)),1.0);  
+                } else {
+                    outSSR = float4(previousPass.rgb*0.99,0.5);
+                }
             } else {
-                previousPass = getColorSampler(ssrAccuSampler,previousCoords);
-                outSSR = float4(previousPass.rgb*0.99,1);
+                outSSR = 0;
             }
         } else {
             outGI = giAo;
@@ -1347,19 +1461,8 @@ namespace DH_UBER_RT {
             outResult = float4(color,1.0);
         } else {
             float originalColorBrightness = getBrightness(color);
-            
-            if(bRemoveAmbient) {
-                float3 colorHSV = RGBtoHSV(color);
-                float3 removedColor = cSourceAmbientLightColor - minOf3(cSourceAmbientLightColor); 
-                float3 sourceColor = color - minOf3(color);
-                float hueDist = maxOf3(abs(removedColor-sourceColor));
-                
-                color = saturate(color-fSourceAmbientIntensity*removedColor*saturate(1.0-hueDist*saturate(colorHSV.y+colorHSV.z)));
-            }
-            
-            if(bAddAmbient) {
-                color = saturate(color+pow(1.0-originalColorBrightness,4.0)*cTargetAmbientLightColor);
-            }
+
+            color = filterAmbiantLight(color);
         
             color = saturate(color*fBaseColor);
             float colorBrightness = originalColorBrightness;
@@ -1384,7 +1487,19 @@ namespace DH_UBER_RT {
                 float3 giHSV = RGBtoHSV(gi);
                 colorHSV.x = giHSV.x;
                 colorHSV.y = giHSV.y;
-                color = lerp(color,HSVtoRGB(colorHSV),saturate(5.0*saturate(fGIHueBiais+0.5*(1.0-safePow(colorBrightness,0.5)))*giBrightness*(1.0-colorBrightness*0.8)*(1.0-colorS*0.5)*(giHSV.y)));
+                float coef = saturate(
+                    5.0 // base
+                    *saturate(
+                        fGIHueBiais // user setting
+                        +0.5*(1.0-safePow(colorBrightness,0.5)) // color brightness bonus
+                    ) //
+                    *(1.0-colorBrightness*0.8) // color brightness
+                    *(1.0-colorS*0.5) // color saturation
+                    *giBrightness // gi brightness
+                    *giHSV.y // gi saturation
+                );
+                    
+                color = lerp(color,HSVtoRGB(colorHSV),coef);
             }
             
             // Base color
@@ -1398,8 +1513,9 @@ namespace DH_UBER_RT {
                 float avg = getBrightness(getColorSamplerLod(giSmoothPassSampler,float2(0.5,0.5),9.0).rgb);
                 darkMerging *= 1.0-avg/2.0;
             }
-            float darkB = safePow(1.0-colorBrightness,3.0);
-            result += lerp(0,(result+0.1)*gi,darkB*darkMerging*4.0);
+            float darkBrightnessLevel = saturate(originalColorBrightness);
+            float darkB = safePow(1.0-darkBrightnessLevel,3.0);
+            result += (lerp(darkBrightnessLevel,result,saturate(colorPureness-giPureness)*5)+0.1)*gi*darkB*darkMerging*4.0;
             
             // Light areas
             float brightB = colorBrightness*safePow(colorBrightness,0.5)*safePow(1.0-colorBrightness,0.75);
@@ -1468,7 +1584,8 @@ namespace DH_UBER_RT {
         } else if(iDebug==DEBUG_SSR) {
             float3 color = getColor(coords).rgb;       
 
-            result = computeSSR(coords,getBrightness(color))*1.5;
+            result = computeSSR(coords,getBrightness(color))*2;
+            //result = getColorSampler(ssrAccuSampler,coords).rgb;
             
         } else if(iDebug==DEBUG_ROUGHNESS) {
 #if ROUGHNESS
@@ -1488,6 +1605,9 @@ namespace DH_UBER_RT {
             float2  motion = getPreviousCoords(coords);
             motion = (motion-coords)*50;
             result = float3(motion,0);
+            
+        } else if(iDebug==DEBUG_AMBIENT) {
+            result = getRemovedAmbiantColor();
         }
         
         outPixel = float4(result,1.0);
@@ -1497,14 +1617,19 @@ namespace DH_UBER_RT {
 // TEHCNIQUES 
     
     technique DH_UBER_RT<
-        ui_label = "DH_UBER_RT 0.12.0";
+        ui_label = "DH_UBER_RT 0.13.0";
         ui_tooltip = 
             "_____________ DH_UBER_RT _____________\n"
             "\n"
-            " ver 0.11.0 (2023-07-10)  by AlucardDH\n"
+            " ver 0.13.0 (2023-07-14)  by AlucardDH\n"
             "\n"
             "______________________________________";
     > {
+        pass {
+            VertexShader = PostProcessVS;
+            PixelShader = PS_SavePreviousAmbientPass;
+            RenderTarget = previousAmbientTex;
+        }
 #if ROUGHNESS
         // Normal Roughness
         pass {
@@ -1513,7 +1638,21 @@ namespace DH_UBER_RT {
             RenderTarget = roughnessTex;
         }
 #endif
-
+        pass {
+            VertexShader = PostProcessVS;
+            PixelShader = PS_AmbientPass;
+            RenderTarget = ambientTex;
+            
+            ClearRenderTargets = false;
+                        
+            BlendEnable = true;
+            BlendOp = ADD;
+            SrcBlend = SRCALPHA;
+            SrcBlendAlpha = ONE;
+            DestBlend = INVSRCALPHA;
+            DestBlendAlpha = ONE;
+        }
+        
         pass {
             VertexShader = PostProcessVS;
             PixelShader = PS_NormalPass;
