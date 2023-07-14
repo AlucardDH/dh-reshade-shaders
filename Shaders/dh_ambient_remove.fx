@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// DH_Ambient_Remove
+// DH_Ambient_Remove 0.2.0
 //
 // This shader is free, if you paid for it, you have been ripped and should ask for a refund.
 //
@@ -31,13 +31,18 @@
 #define getBrightness(color) maxOf3((color))
 #define getPureness(color) (maxOf3((color))-minOf3((color)))
 #define RANDOM_RANGE 1024
+#define CENTER float2(0.5,0.5)
 //////////////////////////////////////////////////////////////////////////////
 
 namespace DH_Ambient_Remove {
 
-// Textures
-    texture ambientTex { Width = 1; Height = 1; Format = RGBA8; };
-    sampler ambientSampler { Texture = ambientTex; };    
+// Textures  
+    
+    texture ambientTex { Width = 1; Height = 1; Format = RGBA16F; };
+    sampler ambientSampler { Texture = ambientTex; };   
+
+    texture previousAmbientTex { Width = 1; Height = 1; Format = RGBA16F; };
+    sampler previousAmbientSampler { Texture = previousAmbientTex; };    
 
 // Internal Uniforms
     uniform int framecount < source = "framecount"; >;
@@ -137,60 +142,75 @@ namespace DH_Ambient_Remove {
     }
 
 // PS ///////////////////////////////////////////////////////////////////////////////
-
+    void PS_SavePreviousPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outAmbient : SV_Target0) {
+        outAmbient = getColorSampler(ambientSampler,CENTER);
+    }
+    
     void PS_AmbientPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outAmbient : SV_Target0) {
-    	if(!bRemoveAmbientAuto) discard;
+        if(!bRemoveAmbientAuto) discard;
 
-        float2 currentCoords = 0;
-		float3 result = 10.0;
-		float bestB = 10.0;
-		float2 bestCoords = 0.5;
-		float2 rand = frameRand()-0.5;
-		
-		float2 size = BUFFER_SIZE;
-		float stepSize = BUFFER_WIDTH/16.0;
-		float2 numSteps = size/(stepSize+1);
-		
-		//float2 rand = randomCouple(currentCoords);
-        for(int it=0;it<=4 && stepSize>=1;it++) {
-        
-        	float2 stepDim = stepSize/BUFFER_SIZE;
-			for(currentCoords.x=bestCoords.x-stepDim.x*(numSteps.x/2);currentCoords.x<=bestCoords.x+stepDim.x*(numSteps.x/2);currentCoords.x+=stepDim.x) {
-                for(currentCoords.y=bestCoords.y-stepDim.y*(numSteps.y/2);currentCoords.y<=bestCoords.y+stepDim.y*(numSteps.y/2);currentCoords.y+=stepDim.y) {
-            		float3 color = getColor(currentCoords+rand*stepDim).rgb;
-					float b = getBrightness(color);
-                    float p = getPureness(color);
-                    float score = b;//-p;
-					if(b>0.08 && score<bestB) {
-						bestB = score;
-						bestCoords = currentCoords+rand*stepDim;
-	            		result = color;//min(color,result);
-					}
-	            }
-	        }
-	        size = stepSize;
-	        numSteps = 8;
-	        stepSize = size.x/8;
+        float3 previous = getColorSampler(previousAmbientSampler,CENTER).rgb;
+        float3 result = previous;
+        float b = getBrightness(result);
+        bool first = false;
+        if(b==0) {
+            result = 1.0;
+            first = true;
+        }
+        if(framecount%60==0) {
+            result = 1.0;
         }
         
-        float opacity = bestB>1 ? 0 : (0.01+getPureness(result))*0.5;
-        if(framecount%600==0) opacity = 0.5;
-		outAmbient = float4(result+getBrightness(result),opacity);
+        float bestB = b;
+        
+        
+        
+        float2 currentCoords = 0;
+        float2 bestCoords = CENTER;
+        float2 rand = frameRand()-0.5;
+        
+        float2 size = BUFFER_SIZE;
+        float stepSize = BUFFER_WIDTH/16.0;
+        float2 numSteps = size/(stepSize+1);
+        
+            
+        //float2 rand = randomCouple(currentCoords);
+        for(int it=0;it<=4 && stepSize>=1;it++) {
+            float2 stepDim = stepSize/BUFFER_SIZE;
+        
+            for(currentCoords.x=bestCoords.x-stepDim.x*(numSteps.x/2);currentCoords.x<=bestCoords.x+stepDim.x*(numSteps.x/2);currentCoords.x+=stepDim.x) {
+                for(currentCoords.y=bestCoords.y-stepDim.y*(numSteps.y/2);currentCoords.y<=bestCoords.y+stepDim.y*(numSteps.y/2);currentCoords.y+=stepDim.y) {
+                    float3 color = getColor(currentCoords+rand*stepDim).rgb;
+                    b = getBrightness(color);
+                    if(b>0.1 && b<bestB) {
+                        result = min(result,color);
+                        bestB = b;
+                    }
+                }
+            }
+            size = stepSize;
+            numSteps = 8;
+            stepSize = size.x/8;
+        }
+        
+        float opacity = b==1 ? 0 : (0.01+getPureness(result))*0.5;
+        outAmbient = float4(result,first ? 1 : opacity);
         
     }
     
     float3 getRemovedAmbiantColor() {
-    	if(bRemoveAmbientAuto) {
-    		return getColorSampler(ambientSampler,float2(0.5,0.5)).rgb;
-    	} else {
-    		return cSourceAmbientLightColor;
-    	}
-    	
+        if(bRemoveAmbientAuto) {
+            float3 color = getColorSampler(ambientSampler,float2(0.5,0.5)).rgb;
+            color += getBrightness(color);
+            return color;
+        } else {
+            return cSourceAmbientLightColor;
+        }
     }
     
     float3 filterAmbiantLight(float3 sourceColor) {
-    	float3 color = sourceColor;
-		float3 colorHSV = RGBtoHSV(color);
+        float3 color = sourceColor;
+        float3 colorHSV = RGBtoHSV(color);
         float3 ral = getRemovedAmbiantColor();
         float3 removedTint = ral - minOf3(ral); 
         float3 sourceTint = color - minOf3(color);
@@ -198,20 +218,20 @@ namespace DH_Ambient_Remove {
         float hueDist = maxOf3(abs(removedTint-sourceTint));
         
         float removal = saturate(1.0-hueDist*saturate(colorHSV.y+colorHSV.z));
-   	 color -= removedTint*removal;
-		color = saturate(color);
+     color -= removedTint*removal;
+        color = saturate(color);
         
         if(bRemoveAmbientPreserveBrightness) {
-        	float sB = getBrightness(sourceColor);
-        	float nB = getBrightness(color);
-        	
-        	color += sB-nB;
+            float sB = getBrightness(sourceColor);
+            float nB = getBrightness(color);
+            
+            color += sB-nB;
         }
         
         color = lerp(sourceColor,color,fSourceAmbientIntensity);
         
         if(bAddAmbient) {
-        	float b = getBrightness(color);
+            float b = getBrightness(color);
             color = saturate(color+pow(1.0-b,4.0)*cTargetAmbientLightColor);
         }
         
@@ -244,15 +264,20 @@ namespace DH_Ambient_Remove {
 
 // TEHCNIQUES 
     
-    technique DH_Ambient_Remove<
-        ui_label = "DH_Ambient_Remove";
+    technique DH_Ambient_Remove <
+        ui_label = "DH_Ambient_Remove 0.2.0";
         ui_tooltip = 
             "_____________ DH_Ambient_Remove _____________\n"
             "\n"
-            "               by AlucardDH\n"
+            "         version 0.2.0 by AlucardDH\n"
             "\n"
             "_____________________________________________";
     > {
+        pass {
+            VertexShader = PostProcessVS;
+            PixelShader = PS_SavePreviousPass;
+            RenderTarget = previousAmbientTex;
+        }
         pass {
             VertexShader = PostProcessVS;
             PixelShader = PS_AmbientPass;
