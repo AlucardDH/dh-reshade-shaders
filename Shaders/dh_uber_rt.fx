@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// DH_UBER_RT 0.13.0 (2023-07-14)
+// DH_UBER_RT 0.13.1 (2023-07-15)
 //
 // This shader is free, if you paid for it, you have been ripped and should ask for a refund.
 //
@@ -41,8 +41,15 @@
 // Default is 1 (activated)
 #define NORMAL_FILTER 1
 
-#define TEX_NOISE (__RENDERER__==0x9000)
-#define OPTIMIZATION_ONE_LOOP_RT (__RENDERER__==0x9000)
+// Enable ambient light functionality
+// Default is 1 (activated)
+#define AMBIENT_ON 1
+
+#define DX9_MODE (__RENDERER__==0x9000)
+
+#define TEX_NOISE DX9_MODE
+#define OPTIMIZATION_ONE_LOOP_RT DX9_MODE
+
 
 // CONSTANTS /////////////////////////////////////////////////////////////////
 // Don't touch this
@@ -108,13 +115,13 @@ namespace DH_UBER_RT {
     texture blueNoiseTex < source ="dh_rt_noise.png" ; > { Width = 512; Height = 512; MipLevels = 1; Format = RGBA8; };
     sampler blueNoiseSampler { Texture = blueNoiseTex;  AddressU = REPEAT;  AddressV = REPEAT;  AddressW = REPEAT;};
 #endif
-
+#if AMBIENT_ON
     texture ambientTex { Width = 1; Height = 1; Format = RGBA16F; };
     sampler ambientSampler { Texture = ambientTex; };   
 
     texture previousAmbientTex { Width = 1; Height = 1; Format = RGBA16F; };
     sampler previousAmbientSampler { Texture = previousAmbientTex; }; 
-    
+#endif 
     texture normalTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8; };
     sampler normalSampler { Texture = normalTex; };
     
@@ -297,6 +304,7 @@ namespace DH_UBER_RT {
     > = 0.2;
 #endif
 
+#if ROUGHNESS
     uniform float fNormalRoughness <
         ui_type = "slider";
         ui_category = "Common RT";
@@ -305,10 +313,10 @@ namespace DH_UBER_RT {
         ui_step = 0.001;
         ui_tooltip = "";
     > = 0.15;
-
+#endif
 
 // AMBIENT LIGHT 
-
+#if AMBIENT_ON
     uniform bool bRemoveAmbient <
         ui_category = "Ambient light";
         ui_label = "Remove Source Ambient light";
@@ -349,7 +357,7 @@ namespace DH_UBER_RT {
         ui_category = "Add ambient light";
         ui_label = "Target Ambient light color";
     > = float3(13.0,13.0,13.0)/255.0;
-    
+#endif
     
 // GI
     
@@ -479,7 +487,6 @@ namespace DH_UBER_RT {
     > = false;
     
 #if ROUGHNESS
-
     uniform int iRoughnessRadius <
         ui_type = "slider";
         ui_category = "SSR";
@@ -787,6 +794,7 @@ namespace DH_UBER_RT {
     }
 #endif
 
+#if AMBIENT_ON
     void PS_SavePreviousAmbientPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outAmbient : SV_Target0) {
         outAmbient = getColorSampler(ambientSampler,CENTER);
     }
@@ -840,6 +848,7 @@ namespace DH_UBER_RT {
         outAmbient = float4(result,first ? 1 : opacity);
         
     }
+#endif
 
     void PS_NormalPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outNormal : SV_Target0) {
         
@@ -862,7 +871,7 @@ namespace DH_UBER_RT {
         
     }
     
-    
+#if AMBIENT_ON 
     float3 getRemovedAmbiantColor() {
         if(bRemoveAmbientAuto) {
             float3 color = getColorSampler(ambientSampler,float2(0.5,0.5)).rgb;
@@ -903,6 +912,7 @@ namespace DH_UBER_RT {
         }
         return color;
     }
+#endif
     
     void PS_RayColorPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outColor : SV_Target0) {
         
@@ -924,9 +934,9 @@ namespace DH_UBER_RT {
                 float depthDiff = abs(depth-refDepth);
                 if(depthDiff<=0.1*refDepth) {
                     float3 color = getColor(currentCoords).rgb;
-                    
+#if AMBIENT_ON  
                     color = filterAmbiantLight(color);
-                    
+#endif         
                     float b = getBrightness(color);
                     float p = getPureness(color);                    
                     
@@ -962,12 +972,12 @@ namespace DH_UBER_RT {
         return  (deltaZ<=0 && deltaZbefore>=0) || (deltaZ>=0 && deltaZbefore<=0);
     }
     
-    float4 trace(float3 refWp,float3 lightVector,float startDepth,bool ssr,bool ssr2) {
+    float4 trace(float3 refWp,float3 incrementVector,float startDepth,bool ssr,bool ssr2) {
                 
         float stepRatio;
         float stepLength = 1.0/fRayStepPrecision;
-        
-        float3 incrementVector = lightVector*stepLength;
+
+        incrementVector *= stepLength;
         
         if(!ssr) {
             incrementVector *= 1+2000*startDepth;
@@ -984,24 +994,54 @@ namespace DH_UBER_RT {
         
         float3 lastSky = 0.0;
         
-        bool firstStep = true;
         
         bool startWeapon = startDepth<fWeaponDepth;
         float weaponLimit = fWeaponDepth*BUFFER_SIZE3.z;
         
-        float distBehind = 0;
-            
-        float3 screenCoords;
-        float3 screenWp;
-        
         bool outSource = false;
-        bool outScreen;
-        float depth;
-        float ratio;
+        
+        bool firstStep = true;
+        [loop]
+        do {
+            currentWp += incrementVector;
+            traceDistance += stepLength;
+            
+            float3 screenCoords = getScreenPosition(currentWp);
+            
+            bool outScreen = !inScreen(screenCoords) && (!startWeapon || currentWp.z<weaponLimit);
+            
+            float depth = ReShade::GetLinearizedDepth(screenCoords.xy);
+            float3 screenWp = getWorldPosition(screenCoords.xy,depth);
+            
+            deltaZ = screenWp.z-currentWp.z;
+            
+            if(depth>fSkyDepth) {
+                lastSky = currentWp;
+            }            
+            
+            if(outScreen || (firstStep && deltaZ<0 && !ssr)) {
+                return RT_MISSED_FAST;
+                
+            } else {
+                float3 currentNormal = getNormal(screenCoords.xy);
+                float dt = dot(currentNormal,refNormal);
+                outSource = dt<1.0;
+            }
+            
+            firstStep = false;
+            
+            deltaZbefore = deltaZ;
+            
+
+            float2 r = randomCouple(screenCoords.xy);
+            stepRatio = 1.00+depth+r.x;
+            
+            stepLength *= stepRatio;
+            incrementVector *= stepRatio;
+
+        } while(!outSource);
+        
         float maxDeltaZ = max(0.1,1.0/iRTCheckHitPrecision);
-        
-        int maxPrecision = iRTCheckHitPrecision;
-        
         float3 crossedWp = 0;
         
         [loop]
@@ -1009,12 +1049,12 @@ namespace DH_UBER_RT {
             currentWp += incrementVector;
             traceDistance += stepLength;
             
-            screenCoords = getScreenPosition(currentWp);
+            float3 screenCoords = getScreenPosition(currentWp);
             
-            outScreen = !inScreen(screenCoords) && (!startWeapon || currentWp.z<weaponLimit);
+            bool outScreen = !inScreen(screenCoords) && (!startWeapon || currentWp.z<weaponLimit);
             
-            depth = ReShade::GetLinearizedDepth(screenCoords.xy);
-            screenWp = getWorldPosition(screenCoords.xy,depth.x);
+            float depth = ReShade::GetLinearizedDepth(screenCoords.xy);
+            float3 screenWp = getWorldPosition(screenCoords.xy,depth);
             
             deltaZ = screenWp.z-currentWp.z;
             
@@ -1022,17 +1062,14 @@ namespace DH_UBER_RT {
                 lastSky = currentWp;
             }            
             
-            if(firstStep && deltaZ<0 && !ssr) {
-                return RT_MISSED_FAST;
-                
-            } else if(outScreen) {
+            if(outScreen) {
                 if(lastSky.x!=0.0) {
                     return float4(lastSky,RT_HIT_SKY);
                 }
              
                 return float4(crossedWp,RT_MISSED);
 
-            } else if(outSource) {
+            } else {
             
                 bool crossed = crossing(deltaZbefore,deltaZ);
                 
@@ -1044,12 +1081,12 @@ namespace DH_UBER_RT {
                     float3 subIncVec = incrementVector;
                     
                     [loop]
-                    for(int i=0;!hit && i<maxPrecision;i++) {
+                    for(int i=0;!hit && i<iRTCheckHitPrecision;i++) {
                         subIncVec *= 0.5;
                         currentWp += subIncVec;
                         
-                        screenCoords = getScreenPosition(currentWp);
-                        depth = ReShade::GetLinearizedDepth(screenCoords.xy);
+                        float3 screenCoords = getScreenPosition(currentWp);
+                        float depth = ReShade::GetLinearizedDepth(screenCoords.xy);
                        
                         screenWp = getWorldPosition(screenCoords.xy,depth);
                         deltaZ = screenWp.z-currentWp.z;  
@@ -1069,21 +1106,14 @@ namespace DH_UBER_RT {
                     }
                     
                     // Stop when vector smaller than 1px
-                    float3 a = abs(incrementVector);
+                    float3 a = abs(subIncVec);
                     if(a.x<1 && a.y<1) break;
                 }
                 
                 
-            } else {
-                float3 currentNormal = getNormal(screenCoords.xy);
-                float dt = dot(currentNormal,refNormal);
-                outSource = dt<1.0;
             }
             
-            firstStep = false;
-            
             deltaZbefore = deltaZ;
-            
 
             float2 r = randomCouple(screenCoords.xy);
             stepRatio = 1.00+depth+r.x;
@@ -1164,8 +1194,6 @@ namespace DH_UBER_RT {
             float d = distance(hitPosition.xyz,refWp);
             
             float3 normal = getNormal(screenCoords.xy);
-            float orientationTarget = dot(lightVector,normal);
-            float orientationSource = dot(lightVector,-refNormal);
                 
             
             float4 giColor;  
@@ -1186,8 +1214,10 @@ namespace DH_UBER_RT {
                 
                     
                 // Light hit orientation
+                float orientationSource = dot(lightVector,-refNormal);
                 giColor.rgb *= saturate(0.25+saturate(orientationSource)*4);
                 
+                float orientationTarget = dot(lightVector,normal);
                 giColor.rgb *= saturate(0.5+saturate(orientationTarget)*3);
                 
             } else {
@@ -1461,9 +1491,9 @@ namespace DH_UBER_RT {
             outResult = float4(color,1.0);
         } else {
             float originalColorBrightness = getBrightness(color);
-
+#if AMBIENT_ON
             color = filterAmbiantLight(color);
-        
+#endif   
             color = saturate(color*fBaseColor);
             float colorBrightness = originalColorBrightness;
             float colorPureness = getPureness(color);
@@ -1607,7 +1637,11 @@ namespace DH_UBER_RT {
             result = float3(motion,0);
             
         } else if(iDebug==DEBUG_AMBIENT) {
+#if AMBIENT_ON
             result = getRemovedAmbiantColor();
+#else   
+            result = 0;
+#endif    
         }
         
         outPixel = float4(result,1.0);
@@ -1617,27 +1651,23 @@ namespace DH_UBER_RT {
 // TEHCNIQUES 
     
     technique DH_UBER_RT<
-        ui_label = "DH_UBER_RT 0.13.0";
+        ui_label = "DH_UBER_RT 0.13.1";
         ui_tooltip = 
             "_____________ DH_UBER_RT _____________\n"
             "\n"
-            " ver 0.13.0 (2023-07-14)  by AlucardDH\n"
+            " ver 0.13.1 (2023-07-15)  by AlucardDH\n"
+#if DX9_MODE
+            "         DX9 limited edition\n"
+#endif
             "\n"
             "______________________________________";
     > {
+#if AMBIENT_ON
         pass {
             VertexShader = PostProcessVS;
             PixelShader = PS_SavePreviousAmbientPass;
             RenderTarget = previousAmbientTex;
         }
-#if ROUGHNESS
-        // Normal Roughness
-        pass {
-            VertexShader = PostProcessVS;
-            PixelShader = PS_RoughnessPass;
-            RenderTarget = roughnessTex;
-        }
-#endif
         pass {
             VertexShader = PostProcessVS;
             PixelShader = PS_AmbientPass;
@@ -1652,7 +1682,15 @@ namespace DH_UBER_RT {
             DestBlend = INVSRCALPHA;
             DestBlendAlpha = ONE;
         }
-        
+#endif
+#if ROUGHNESS
+        // Normal Roughness
+        pass {
+            VertexShader = PostProcessVS;
+            PixelShader = PS_RoughnessPass;
+            RenderTarget = roughnessTex;
+        }
+#endif
         pass {
             VertexShader = PostProcessVS;
             PixelShader = PS_NormalPass;
