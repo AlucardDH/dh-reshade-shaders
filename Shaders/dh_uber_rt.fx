@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// DH_UBER_RT 0.13.1 (2023-07-15)
+// DH_UBER_RT 0.13.2 (2023-07-30)
 //
 // This shader is free, if you paid for it, you have been ripped and should ask for a refund.
 //
@@ -135,8 +135,8 @@ namespace DH_UBER_RT {
     texture giPassTex { Width = RENDER_WIDTH; Height = RENDER_HEIGHT; Format = RGBA8; MipLevels = 6; };
     sampler giPassSampler { Texture = giPassTex; MinLOD = 0.0f; MaxLOD = 5.0f;};
     
-    texture giSmoothPassTex { Width = RENDER_WIDTH; Height = RENDER_HEIGHT; Format = RGBA8; MipLevels = 9; };
-    sampler giSmoothPassSampler { Texture = giSmoothPassTex; MinLOD = 0.0f; MaxLOD = 9.0f;};
+    texture giSmoothPassTex { Width = RENDER_WIDTH; Height = RENDER_HEIGHT; Format = RGBA8; MipLevels = 6; };
+    sampler giSmoothPassSampler { Texture = giSmoothPassTex; MinLOD = 0.0f; MaxLOD = 5.0f;};
     
     texture giAccuTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8; };
     sampler giAccuSampler { Texture = giAccuTex; };
@@ -1651,11 +1651,11 @@ namespace DH_UBER_RT {
 // TEHCNIQUES 
     
     technique DH_UBER_RT<
-        ui_label = "DH_UBER_RT 0.13.1";
+        ui_label = "DH_UBER_RT 0.13.2";
         ui_tooltip = 
             "_____________ DH_UBER_RT _____________\n"
             "\n"
-            " ver 0.13.1 (2023-07-15)  by AlucardDH\n"
+            " ver 0.13.2 (2023-07-30)  by AlucardDH\n"
 #if DX9_MODE
             "         DX9 limited edition\n"
 #endif
