@@ -148,7 +148,7 @@ namespace DH_Lain {
 			if(bBorderBleed && iBleedRadius>0) {
 				float stepSize = iBleedRadius/iBleedSteps;
 				int2 delta = 0;
-				bool found = false;
+				int found = 0;
 				float radius = stepSize;
 				for(radius=stepSize;!found && radius<=iBleedRadius;radius+=stepSize) {
 					delta.x = -radius;
@@ -158,7 +158,7 @@ namespace DH_Lain {
 						float4 searchColor = getColor(searchCoords);
 						float seachB = getBrightness(searchColor.rgb);
 						if(seachB>=fBrightnessLimit) {
-							found = true;
+							found = 1;
 						}
 					}
 					if(found) break;
@@ -169,7 +169,7 @@ namespace DH_Lain {
 						float4 searchColor = getColor(searchCoords);
 						float seachB = getBrightness(searchColor.rgb);
 						if(seachB>=fBrightnessLimit) {
-							found = true;
+							found = 1;
 						}
 					}
 					if(found) break;
@@ -180,7 +180,7 @@ namespace DH_Lain {
 						float4 searchColor = getColor(searchCoords);
 						float seachB = getBrightness(searchColor.rgb);
 						if(seachB>=fBrightnessLimit) {
-							found = true;
+							found = 1;
 						}
 					}
 					if(found) break;
@@ -191,12 +191,12 @@ namespace DH_Lain {
 						float4 searchColor = getColor(searchCoords);
 						float seachB = getBrightness(searchColor.rgb);
 						if(seachB>=1.0-fBrightnessLimit) {
-							found = true;
+							found = 1;
 						}
 					}
 				}
 				
-				if(found) {
+				if(found>0) {
 					blood.r = max(blood.r,fBleedIntensity*bloodRatio*float(iBleedRadius-radius+1)/iBleedRadius);//-blood.r;
 				}
 			}
