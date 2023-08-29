@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// DH_UBER_MASK 0.3.0
+// DH_UBER_MASK 0.3.1
 //
 // This shader is free, if you paid for it, you have been ripped and should ask for a refund.
 //
@@ -40,6 +40,14 @@ namespace DH_UBER_MASK {
     uniform bool bTest2 = true;
     uniform bool bTest3 = true;
     */
+    
+    uniform int iDebug <
+        ui_category = "Debug";
+        ui_type = "combo";
+        ui_label = "Display";
+        ui_items = "Output\0Full Mask\0Mask overlay\0";
+        ui_tooltip = "Debug the intermediate steps of the shader";
+    > = 0;
 
 // Depth mask
 
@@ -118,7 +126,7 @@ namespace DH_UBER_MASK {
         ui_type = "slider";
         ui_category = "Difference mask";
         ui_label = "Difference";
-        ui_min = 0.0; ui_max = 1.0;
+        ui_min = 0.0; ui_max = 2.0;
         ui_step = 0.001;
         ui_tooltip = "";
     > = float2(1.0,1.0);
@@ -141,32 +149,32 @@ namespace DH_UBER_MASK {
     }
     
     float computeMask(float value, float3 params) {
-        if(value<=params[0]) {
-            return smoothstep(params[0]-params[1],params[0],value)*params[2];
-        } else {
-            return (1.0-smoothstep(params[0],params[0]+params[1],value))*params[2];
-        }
+    	if(value<=params[0]) {
+    		return smoothstep(params[0]-params[1],params[0],value)*params[2];
+    	} else {
+    		return (1.0-smoothstep(params[0],params[0]+params[1],value))*params[2];
+    	}
     }
     
     float getBrightness(float3 color) {
-        if(iBrightnessMethod==0) {
-            return maxOf3(color);
-        }
-        if(iBrightnessMethod==1) {
-            return avgOf3(color);
-        }
-        return minOf3(color);
+    	if(iBrightnessMethod==0) {
+    		return maxOf3(color);
+    	}
+    	if(iBrightnessMethod==1) {
+    		return avgOf3(color);
+    	}
+    	return minOf3(color);
     }
     
     float getDifference(float3 before,float3 after) {
-        float3 diff = abs(before-after);
-        if(iDiffMethod==0) {
-            return maxOf3(diff);
-        }
-        if(iDiffMethod==1) {
-            return avgOf3(diff);
-        }
-        return minOf3(diff);
+    	float3 diff = abs(before-after);
+    	if(iDiffMethod==0) {
+    		return maxOf3(diff);
+    	}
+    	if(iDiffMethod==1) {
+    		return avgOf3(diff);
+    	}
+    	return minOf3(diff);
     }
 
     void PS_Apply(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outColor : SV_Target0) {
@@ -187,16 +195,22 @@ namespace DH_UBER_MASK {
         
         float diff = saturate(getDifference(beforeColor.rgb,afterColor.rgb)*2.0);
         mask += computeMask(diff,float3(1.0,fDiffMask));
-        
 
-        outColor = lerp(beforeColor,afterColor,1.0-saturate(mask));
+		mask = saturate(mask);
+		if(iDebug==1) {
+        	outColor = float4(mask,mask,mask,1.0);
+		} else if(iDebug==2) {
+        	outColor = lerp(afterColor,float4(0,1,0,1),mask);
+		} else {
+        	outColor = lerp(beforeColor,afterColor,1.0-mask);
+        }
     }
 
 
 // TEHCNIQUES 
     
     technique DH_UBER_MASK_BEFORE<
-        ui_label = "DH_UBER_MASK 0.3.0 BEFORE";
+        ui_label = "DH_UBER_MASK 0.3.1 BEFORE";
     > {
         pass {
             VertexShader = PostProcessVS;
@@ -206,7 +220,7 @@ namespace DH_UBER_MASK {
     }
 
     technique DH_UBER_MASK_AFTER<
-        ui_label = "DH_UBER_MASK 0.3.0 AFTER";
+        ui_label = "DH_UBER_MASK 0.3.1 AFTER";
     > {
         pass {
             VertexShader = PostProcessVS;
