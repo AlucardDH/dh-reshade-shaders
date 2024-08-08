@@ -1,57 +1,105 @@
+////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// DH_Lain 1.1 (2024-08-09)
+//
+// This shader is free, if you paid for it, you have been ripped and should ask for a refund.
+//
+// This shader is developed by AlucardDH (Damien Hembert)
+//
+// Get more here : https://alucarddh.github.io
+// Join my Discord server for news, request, bug reports or help : https://discord.gg/V9HgyBRgMW
+//
+////////////////////////////////////////////////////////////////////////////////////////////////
 #include "Reshade.fxh"
 
-namespace DH_Lain {
+#define BUFFER_SIZE int2(BUFFER_WIDTH,BUFFER_HEIGHT)
+
+#ifndef PRIMARY_TEXTURE
+ #define PRIMARY_TEXTURE "lain_blood_1024.png"
+#endif
+#ifndef SECONDARY_TEXTURE
+ #define SECONDARY_TEXTURE "lain_cloud_1024.png"
+#endif
+namespace Lain11 {
 
 // Uniforms
-
-	uniform bool bBorderBleed <
-	    ui_category = "Borders";
-		ui_label = "Bleed Borders";
+	
+	
+	uniform bool bTest <
+	    ui_category = "Test";
+	> = false;
+	uniform bool bTest2 <
+	    ui_category = "Test";
 	> = false;
 	
-	uniform int iBleedRadius <
-	    ui_category = "Borders";
-		ui_label = "Bleed radius";
-		ui_type = "slider";
-	    ui_min = 0;
-	    ui_max = 128;
-	    ui_step = 1;
-	> = 48;
-
-	uniform int iBleedSteps <
-	    ui_category = "Borders";
-		ui_label = "Bleed steps";
-		ui_type = "slider";
-	    ui_min = 1;
-	    ui_max = 16;
-	    ui_step = 1;
-	> = 6;
+//// COMMONS
+	uniform bool bDebug <
+	    ui_category = "Common";
+		ui_label = "Debug";
+	> = false;
 	
-	uniform float fBleedIntensity <
+	uniform float fBrightnessLimit <
+	    ui_category = "Common";
+		ui_label = "Brightness Limit";
+		ui_type = "slider";
+	    ui_min = 0.0;
+	    ui_max = 1.0;
+	    ui_step = 0.01;
+	> = 0.10;
+	
+//// BORDERS
+	uniform bool bBorder <
+	    ui_category = "Borders";
+		ui_label = "Enable";
+	> = false;
+	
+	uniform bool bBorderPrecise <
+	    ui_category = "Borders";
+		ui_label = "Precise method";
+	> = false;
+	
+	uniform float fBorderIntensity <
 	    ui_category = "Borders";
 		ui_label = "Intensity";
 		ui_type = "slider";
 	    ui_min = 0.0;
 	    ui_max = 1.0;
 	    ui_step = 0.01;
-	> = 0.5;
+	> = 0.2;
 	
-	uniform bool bUseDepth <
-	    ui_category = "Blood";
+	uniform int iBorderRadius <
+	    ui_category = "Borders";
+		ui_label = "Radius";
+		ui_type = "slider";
+	    ui_min = 1;
+	    ui_max = 128;
+	    ui_step = 1;
+	> = 32;
+
+	uniform int iBorderStepSize <
+	    ui_category = "Borders";
+		ui_label = "Step size";
+		ui_type = "slider";
+	    ui_min = 1;
+	    ui_max = 8;
+	    ui_step = 1;
+	> = 3;
+	
+	uniform float3 cBorderColor <
+	    ui_category = "Borders";
+		ui_label = "Color";
+		ui_type = "color";
+	> = float3(1,0,0);
+	
+///// PRIMARY
+
+	uniform bool bPrimaryDepth <
+	    ui_category = "Primary texture";
 		ui_label = "Use depth";
 	> = true;
-
-	uniform float fBrightnessLimit <
-	    ui_category = "Blood";
-		ui_label = "Brightness Limit";
-		ui_type = "slider";
-	    ui_min = 0.0;
-	    ui_max = 1.0;
-	    ui_step = 0.01;
-	> = 0.05;
 	
-	uniform float fIntensity <
-	    ui_category = "Blood";
+	uniform float fPrimaryIntensity <
+	    ui_category = "Primary texture";
 		ui_label = "Intensity";
 		ui_type = "slider";
 	    ui_min = 0.0;
@@ -59,8 +107,8 @@ namespace DH_Lain {
 	    ui_step = 0.01;
 	> = 0.4;
 	
-	uniform float fCurvePower <
-	    ui_category = "Blood";
+	uniform float fPrimaryCurvePower <
+	    ui_category = "Primary texture";
 		ui_label = "Curve power";
 		ui_type = "slider";
 	    ui_min = 1.0;
@@ -68,18 +116,35 @@ namespace DH_Lain {
 	    ui_step = 0.1;
 	> = 2.5;
 
-	uniform float fScale <
-	    ui_category = "Blood";
+	uniform float fPrimaryScale <
+	    ui_category = "Primary texture";
 		ui_label = "Scale";
 		ui_type = "slider";
 	    ui_min = 0.1;
 	    ui_max = 8.0;
 	    ui_step = 0.1;
 	> = 1.0;
-
 	
-	uniform float fCloudIntensity <
-	    ui_category = "Cloud";
+	uniform bool bPrimaryForceColor <
+	    ui_category = "Primary texture";
+		ui_label = "Force Color";
+	> = true;
+	
+	uniform float3 cPrimaryColor <
+	    ui_category = "Primary texture";
+		ui_label = "Color";
+		ui_type = "color";
+	> = float3(1,0,0);
+
+///// SECONDARY
+
+	uniform bool bSecondaryDepth <
+	    ui_category = "Secondary texture";
+		ui_label = "Use depth";
+	> = false;
+	
+	uniform float fSecondaryIntensity <
+	    ui_category = "Secondary texture";
 		ui_label = "Intensity";
 		ui_type = "slider";
 	    ui_min = 0.0;
@@ -87,8 +152,8 @@ namespace DH_Lain {
 	    ui_step = 0.01;
 	> = 0.30;
 	
-	uniform float fCloudCurvePower <
-	    ui_category = "Cloud";
+	uniform float fSecondaryCurvePower <
+	    ui_category = "Secondary texture";
 		ui_label = "Curve power";
 		ui_type = "slider";
 	    ui_min = 1.0;
@@ -96,22 +161,33 @@ namespace DH_Lain {
 	    ui_step = 0.1;
 	> = 3.0;
 
-	uniform float fCloudScale <
-	    ui_category = "Cloud";
+	uniform float fSecondaryScale <
+	    ui_category = "Secondary texture";
 		ui_label = "Scale";
 		ui_type = "slider";
 	    ui_min = 0.1;
 	    ui_max = 8.0;
 	    ui_step = 0.1;
 	> = 1.5;
+	
+	uniform bool bSecondaryForceColor <
+	    ui_category = "Secondary texture";
+		ui_label = "Force Color";
+	> = true;
+	
+	uniform float3 cSecondaryColor <
+	    ui_category = "Secondary texture";
+		ui_label = "Color";
+		ui_type = "color";
+	> = float3(133.0/255.0,0,174.0/255.0);
 
 	
 // Textures
-	texture BloodStainTex < source ="lain_blood_1024.png" ; > { Width = 1024; Height = 1024; };
-	sampler BloodStainSampler { Texture = BloodStainTex; AddressU = REPEAT;	AddressV = REPEAT;	AddressW = REPEAT;};
+	texture PrimaryTex <source=PRIMARY_TEXTURE;  > { Width = 1024; Height = 1024; };
+	sampler PrimarySampler { Texture = PrimaryTex;AddressU=REPEAT;AddressV=REPEAT;AddressW=REPEAT;};
 	
-	texture CloudStainTex < source ="lain_cloud_1024.png" ; > { Width = 1024; Height = 1024; };
-	sampler CloudStainSampler { Texture = CloudStainTex; AddressU = REPEAT;	AddressV = REPEAT;	AddressW = REPEAT;};
+	texture SecondaryTex <source=SECONDARY_TEXTURE; > { Width = 1024; Height = 1024; };
+	sampler SecondarySampler { Texture = SecondaryTex;AddressU=REPEAT;AddressV=REPEAT;AddressW=REPEAT;};
 
 // Functions
 
@@ -123,103 +199,145 @@ namespace DH_Lain {
 	float4 getColor(float2 coords) {
 		return tex2Dlod(ReShade::BackBuffer,float4(coords,0.0,0.0));
 	}
+	
+	
+	float3 getBorder(float2 coords,float brightness) {
+		if(!bBorder || iBorderRadius<=0) {
+			return 0;
+		}
+		
+		float borderDist = -1;
+		float borderScore = 99999;
+		
+		float2 delta = 0;
+		if(!bBorderPrecise) {
+			for(float dist=0;dist<=iBorderRadius;dist+=iBorderStepSize) {
+				for(delta.x=-dist;delta.x<=dist;delta.x+=max(1,dist)) {
+					for(delta.y=-dist;delta.y<=dist;delta.y+=max(1,dist)) {
+					
+						float2 searchCoords = coords + delta*ReShade::PixelSize;
+						float4 searchColor = getColor(searchCoords);
+						float seachB = getBrightness(searchColor.rgb);
+						if(seachB>=fBrightnessLimit) {
+							float score = 10*seachB*dist/iBorderRadius;
+							if(borderScore>score) {
+								borderDist = dist;
+								borderScore = score;
+							}
+						}
+					}
+				}
+			}
+			
+		} else {
+			for(delta.x=-iBorderRadius;delta.x<=iBorderRadius;delta.x+=iBorderStepSize) {
+				for(delta.y=-iBorderRadius;delta.y<=iBorderRadius;delta.y+=iBorderStepSize) {
+					float dist = length(delta);
+					
+					float2 searchCoords = coords + delta*ReShade::PixelSize;
+					float4 searchColor = getColor(searchCoords);
+					float seachB = getBrightness(searchColor.rgb);
+					if(seachB>=fBrightnessLimit) {
+						float score = 10*seachB*dist/iBorderRadius;
+						if(borderScore>score) {
+							borderDist = dist;
+							borderScore = score;
+						}
+					}
+				}
+			}
+		}
+		
+
+		
+		if(borderDist!=-1) {
+			float ratio = fBorderIntensity*saturate(1.0-brightness/fBrightnessLimit);
+			return cBorderColor*ratio*saturate(1.0-borderScore)*float(iBorderRadius-borderDist+1)/iBorderRadius;
+		}
+		
+		return 0;
+	}
+	
+	float3 getTextureValue(
+		sampler textureSampler, 
+		float2 coords,
+		bool useDepth, float depth,
+		float scale,
+		bool forceColor,float3 color,
+		float brightness, float intensity, float curve
+	) {
+		coords /= scale;
+		coords.x *= float(BUFFER_WIDTH)/BUFFER_HEIGHT;
+		if(useDepth) {
+			coords *= pow(2.0,depth);
+		}
+		
+		float3 tex = tex2D(textureSampler,coords).rgb;
+		if(forceColor) {
+			
+			tex = getBrightness(tex)*color/getBrightness(color);
+		}
+		
+		float ratio = intensity*pow(saturate(1.0-brightness/fBrightnessLimit),curve);
+		
+		return tex*ratio;
+	}
 
 
 // Pixel shaders
 
 	void PS_result(in float4 position : SV_Position, in float2 coords : TEXCOORD, out float4 outPixel : SV_Target)
 	{
-		float4 color = getColor(coords);
-		float b = getBrightness(color.rgb);
-		float3 result = color.rgb;
-		if(b<=fBrightnessLimit) {
-			float2 coordsBlood = coords/fScale;
-			coordsBlood.x *= float(BUFFER_WIDTH)/BUFFER_HEIGHT;
-
-			if(bUseDepth) {
-				coordsBlood *= pow(2.0,ReShade::GetLinearizedDepth(coords));
-			}
-			
-			float3 blood = tex2D(BloodStainSampler,coordsBlood).rgb;
-			float bloodRatio = fIntensity*pow(saturate(1.0-b/fBrightnessLimit),fCurvePower);
-			blood *= bloodRatio;
-			
+		float3 color = getColor(coords).rgb;
+		float brightness = getBrightness(color.rgb);
 		
-			if(bBorderBleed && iBleedRadius>0) {
-				float stepSize = iBleedRadius/iBleedSteps;
-				int2 delta = 0;
-				int found = 0;
-				float radius = stepSize;
-				for(radius=stepSize;!found && radius<=iBleedRadius;radius+=stepSize) {
-					delta.x = -radius;
-					[loop]
-					for(delta.y=-radius;!found && delta.y<=radius;delta.y++) {
-						float2 searchCoords = coords + delta*ReShade::PixelSize;
-						float4 searchColor = getColor(searchCoords);
-						float seachB = getBrightness(searchColor.rgb);
-						if(seachB>=fBrightnessLimit) {
-							found = 1;
-						}
-					}
-					if(found) break;
-					delta.x = radius;
-					[loop]
-					for(delta.y=-radius;!found && delta.y<=radius;delta.y++) {
-						float2 searchCoords = coords + delta*ReShade::PixelSize;
-						float4 searchColor = getColor(searchCoords);
-						float seachB = getBrightness(searchColor.rgb);
-						if(seachB>=fBrightnessLimit) {
-							found = 1;
-						}
-					}
-					if(found) break;
-					delta.y = -radius;
-					[loop]
-					for(delta.x=-radius+1;!found && delta.x<=radius-1;delta.x++) {
-						float2 searchCoords = coords + delta*ReShade::PixelSize;
-						float4 searchColor = getColor(searchCoords);
-						float seachB = getBrightness(searchColor.rgb);
-						if(seachB>=fBrightnessLimit) {
-							found = 1;
-						}
-					}
-					if(found) break;
-					delta.y = radius;
-					[loop]
-					for(delta.x=-radius+1;!found && delta.x<=radius-1;delta.x++) {
-						float2 searchCoords = coords + delta*ReShade::PixelSize;
-						float4 searchColor = getColor(searchCoords);
-						float seachB = getBrightness(searchColor.rgb);
-						if(seachB>=1.0-fBrightnessLimit) {
-							found = 1;
-						}
-					}
-				}
-				
-				if(found>0) {
-					blood.r = max(blood.r,fBleedIntensity*bloodRatio*float(iBleedRadius-radius+1)/iBleedRadius);//-blood.r;
-				}
+		if(brightness<=fBrightnessLimit) {
+			float depth = ReShade::GetLinearizedDepth(coords);
+			
+			float3 addedColor = 0;
+			
+			// BORDER
+			addedColor = getBorder(coords,brightness);
+			
+			// PRIMARY
+			addedColor = max(addedColor,
+							getTextureValue(
+								PrimarySampler,coords,
+								bPrimaryDepth,depth,
+								fPrimaryScale,
+								bPrimaryForceColor,cPrimaryColor,
+								brightness,fPrimaryIntensity,fPrimaryCurvePower
+							)
+						);
+			
+			// SECONDARY
+			addedColor = max(addedColor,
+							getTextureValue(
+								SecondarySampler,coords,
+								bSecondaryDepth,depth,
+								fSecondaryScale,
+								bSecondaryForceColor,cSecondaryColor,
+								brightness,fSecondaryIntensity,fSecondaryCurvePower
+							)
+						);
+			
+			if(bDebug) {
+				color = addedColor;
+			} else {
+				color += addedColor;
 			}
 			
-			float2 coordsCloud = coords/fCloudScale;
-			coordsCloud.x *= float(BUFFER_WIDTH)/BUFFER_HEIGHT;
-			
-			float3 cloud = tex2D(CloudStainSampler,coordsCloud).rgb;
-			cloud *= fCloudIntensity*pow(saturate(1.0-b/fBrightnessLimit),fCloudCurvePower);
-			
-			
-			result += max(blood,cloud);
-			
-			
-			
+		} else if(bDebug) {
+			color = 0;
 		}
 		
-		outPixel = float4(result,1.0);
+		outPixel = float4(color,1.0);
 	}
 	
 // Techniques
 
-	technique DH_Lain <
+	technique DH_Lain11 <
+        ui_label = "DH_Lain 1.1";
 	>
 	{
 		pass
