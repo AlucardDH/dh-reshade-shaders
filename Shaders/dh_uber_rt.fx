@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// DH_UBER_RT 0.19.1 (2024-11-14)
+// DH_UBER_RT 0.19.2 (2024-11-17)
 //
 // This shader is free, if you paid for it, you have been ripped and should ask for a refund.
 //
@@ -117,7 +117,7 @@ namespace Deferred {
 
 #define S_PR MagFilter=POINT;MinFilter=POINT;MipFilter= POINT;AddressU=REPEAT;AddressV=REPEAT;AddressW=REPEAT;
 
-namespace DH_UBER_RT_0191 {
+namespace DH_UBER_RT_0192 {
 
     // Textures
 
@@ -286,7 +286,7 @@ namespace DH_UBER_RT_0191 {
         ui_type = "slider";
         ui_category = "Common";
         ui_label = "Depth multiplier";
-        ui_min = 0.001; ui_max = 10.00;
+        ui_min = 0.001; ui_max = 20.00;
         ui_step = 0.001;
     > = 1;
 
@@ -434,8 +434,12 @@ namespace DH_UBER_RT_0191 {
         ui_step = 1;
         ui_tooltip = "Define the number of denoising samples.\n"
                     "Higher:less noise, less performances\n"
-                    "/!\\ HAS A BIG INPACT ON PERFORMANCES";
+                    "/!\\ HAS A BIG INPACT ON PERFORMANCES";    
+#if DX9_MODE
+    > = 32;
+#else
     > = 20;
+#endif
     
     uniform int iSmoothRadius <
         ui_type = "slider";
@@ -456,7 +460,11 @@ namespace DH_UBER_RT_0191 {
                     "Lower=less ghosting in motion, more noise\n"
                     "Higher=more ghosting in motion, less noise\n"
                     "/!\\ If motion detection is disable, decrease this to 3 except if you have a very high fps";
+#if DX9_MODE
+    > = 32;
+#else
     > = 16;
+#endif
     
     uniform int iAOFrameAccu <
         ui_type = "slider";
@@ -468,7 +476,11 @@ namespace DH_UBER_RT_0191 {
                     "Lower=less ghosting in motion, more noise\n"
                     "Higher=more ghosting in motion, less noise\n"
                     "/!\\ If motion detection is disable, decrease this to 3 except if you have a very high fps";
+#if DX9_MODE
+    > = 16;
+#else
     > = 8;
+#endif
     
 	uniform float fGIRayColorMinBrightness <
         ui_type = "slider";
@@ -657,6 +669,23 @@ namespace DH_UBER_RT_0191 {
         ui_label = "Reflections in reflection";
     > = false;
     
+    uniform int iSSRCorrectionMode <
+        ui_type = "combo";
+        ui_category = "SSR";
+        ui_label = "Geometry correction mode";
+        ui_items = "No correction\0Uniform\0Relative to center\0";
+        ui_tooltip = "Try modifying this value is the relfection seems wrong";
+    > = 0;
+    
+    uniform float fSSRCorrectionStrength <
+        ui_type = "slider";
+        ui_category = "SSR";
+        ui_label = "Geometry correction strength";
+        ui_min = -1; ui_max = 1;
+        ui_step = 0.001;
+        ui_tooltip = "Try modifying this value is the relfection seems wrong";
+    > = 0;
+    
     uniform int iSSRFrameAccu <
         ui_type = "slider";
         ui_category = "SSR";
@@ -667,7 +696,11 @@ namespace DH_UBER_RT_0191 {
                     "Lower=less ghosting in motion, more noise\n"
                     "Higher=more ghosting in motion, less noise\n"
                     "/!\\ If motion detection is disable, decrease this to 3 except if you have a very high fps";
-    > = 4;
+#if DX9_MODE
+    > = 12;
+#else
+    > = 6;
+#endif
     
     uniform float fMergingRoughness <
         ui_type = "slider";
@@ -865,8 +898,6 @@ namespace DH_UBER_RT_0191 {
         return coords.x>=0.0 && coords.x<=1.0
             && coords.y>=0.0 && coords.y<=1.0;
     }
-    
-
     
     float3 getWorldPositionForNormal(float2 coords,bool ignoreRoughness) {
         float depth = getDepth(coords);
@@ -1435,7 +1466,7 @@ namespace DH_UBER_RT_0191 {
 		return distance(refWp-refNormal*0.5,hitWp)>distance(refWp,hitWp);
 	}
 	
-    RTOUT trace(float3 refWp,float3 incrementVector,float startDepth,bool ssr,bool lightTarget,float3 targetWp) {
+    RTOUT trace(float3 refWp,float3 incrementVector,bool ssr,bool lightTarget,float3 targetWp) {
     
         RTOUT result;
         result.status = RT_MISSED;
@@ -1535,8 +1566,7 @@ namespace DH_UBER_RT_0191 {
             	stepBehind = 0;
             }          
         }
-        
-        
+
         if(lightTarget) {
             result.status = behind ? RT_HIT_BEHIND : RT_HIT;
         	if(result.status==RT_HIT_BEHIND && DRTF.z<50) {
@@ -1801,7 +1831,7 @@ namespace DH_UBER_RT_0191 {
             	lightVector = rand;
 			}
 
-            RTOUT hitPosition = trace(refWp,lightVector,depth,false,doTargetLight,targetWp);
+            RTOUT hitPosition = trace(refWp,lightVector,false,doTargetLight,targetWp);
             
             handleHit(
 				refWp, refNormal, lightVector, doTargetLight, targetColor,targetWp, hitPosition, 
@@ -1958,7 +1988,7 @@ namespace DH_UBER_RT_0191 {
                 float3 lightVector = normalize(targetWp-refWp);
                 float3 targetColor = getRayColor(targetCoords.xy).rgb;
                 
-                RTOUT hitPosition = trace(refWp,lightVector,depth,false,doTargetLight,targetWp);
+                RTOUT hitPosition = trace(refWp,lightVector,false,doTargetLight,targetWp);
                 handleHit(
                     refWp, refNormal, lightVector, doTargetLight, targetColor, targetWp, hitPosition, 
                     sky, bestRay, sumAO, hits, mergedGiColor,
@@ -2018,7 +2048,7 @@ namespace DH_UBER_RT_0191 {
                 float3 lightVector = normalize(targetWp-refWp);
                 float3 targetColor = getRayColor(targetCoords.xy).rgb;
                 
-                RTOUT hitPosition = trace(refWp,lightVector,depth,false,doTargetLight,targetWp);
+                RTOUT hitPosition = trace(refWp,lightVector,false,doTargetLight,targetWp);
                 handleHit(
                     refWp, refNormal, lightVector, doTargetLight, targetColor, targetWp, hitPosition, 
                     sky, bestRay, sumAO, hits, mergedGiColor,
@@ -2075,7 +2105,7 @@ namespace DH_UBER_RT_0191 {
                         float3 lightVector = normalize(targetWp-refWp);
                         float3 targetColor = getRayColor(targetCoords.xy).rgb;
                     
-                        RTOUT hitPosition = trace(refWp,lightVector,depth,false,doTargetLight,targetWp);
+                        RTOUT hitPosition = trace(refWp,lightVector,false,doTargetLight,targetWp);
                         
                         handleHit(
                             refWp, refNormal, lightVector, doTargetLight, targetColor, targetWp, hitPosition, 
@@ -2122,7 +2152,7 @@ namespace DH_UBER_RT_0191 {
                         float3 lightVector = normalize(targetWp-refWp);
                         float3 targetColor = getRayColor(targetCoords.xy).rgb;
                     
-                        RTOUT hitPosition = trace(refWp,lightVector,depth,false,doTargetLight,targetWp);
+                        RTOUT hitPosition = trace(refWp,lightVector,false,doTargetLight,targetWp);
                         
                         handleHit(
                             refWp, refNormal, lightVector, doTargetLight, targetColor, targetWp, hitPosition, 
@@ -2204,18 +2234,29 @@ namespace DH_UBER_RT_0191 {
                 float3 targetWp = getWorldPosition(subCoords,depth); 
                 float3 targetNormal = getNormal(subCoords);
                 
-        
-                float3 lightVector = reflect(targetWp,targetNormal);
+                float3 inputRay = targetWp;
+                if(iSSRCorrectionMode==1) { // uniform
+                	inputRay.z -= fSSRCorrectionStrength*100.0;
+                } else if(iSSRCorrectionMode==2) { // relative to center
+                	float centerDist = distance(subCoords*BUFFER_SIZE,BUFFER_SIZE/2);
+                	inputRay.z -= centerDist*fSSRCorrectionStrength*0.1;
+                }
                 
-                RTOUT hitPosition = trace(targetWp,lightVector,depth,true,false,0);
+				float3 lightVector = normalize(reflect(inputRay,targetNormal));
+                
+                RTOUT hitPosition = trace(targetWp,lightVector,true,false,0);
 				float3 screenPosition = getScreenPosition(hitPosition.wp.xyz);
                     
                 if(hitPosition.status<RT_HIT_SKY) {
+                	
                 } else {
                     //float3 screenPosition = getScreenPosition(hitPosition.wp.xyz);
                     float2 previousCoords = getPreviousCoords(screenPosition.xy);
                     float depth = getDepth(screenPosition.xy);
                     float3 c = getColorSampler(resultSampler,previousCoords).rgb;
+                    //if(bSSRHQSubPixel && hitPosition.status==RT_HIT_BEHIND) {
+                	//	c = 0;
+                	//}
                     
 					float3 hitNormal = getNormal(screenPosition.xy);
                     if(distance(hitNormal,targetNormal)<0.2) continue;
@@ -2291,7 +2332,7 @@ namespace DH_UBER_RT_0191 {
         float2 previousCoords = getPreviousCoords(coords);            
         
         		
-        float4 refSSR = getColorSampler(sourceSSRSampler,coords);
+        float4 refSSR = bSSR ? getColorSampler(sourceSSRSampler,coords) : 0;
         
         float2 currentCoords;
         
@@ -2454,6 +2495,8 @@ namespace DH_UBER_RT_0191 {
 	    	
 	    	if(bSSR) {
 				float4 previousSSRm = getColorSampler(ssrPreviousAccuSampler,previousCoords);
+				float4 previousSSR = getColorSampler(ssrPreviousAccuSampler,coords);
+				previousSSRm = lerp(previousSSRm,previousSSR,0.5);
 				
         		float op = 1.0/iSSRFrameAccu;
             	op = max(op/3,op*saturate(1.0-refDepth*3));
@@ -2806,11 +2849,11 @@ namespace DH_UBER_RT_0191 {
 // TEHCNIQUES 
     
     technique DH_UBER_RT <
-        ui_label = "DH_UBER_RT 0.19.1";
+        ui_label = "DH_UBER_RT 0.19.2";
         ui_tooltip = 
             "_____________ DH_UBER_RT _____________\n"
             "\n"
-            " ver 0.19.1 (2024-11-14)  by AlucardDH\n"
+            " ver 0.19.2 (2024-11-17)  by AlucardDH\n"
 #if DX9_MODE
             "         DX9 limited edition\n"
 #endif
