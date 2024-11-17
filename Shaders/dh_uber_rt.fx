@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// DH_UBER_RT 0.19.2 (2024-11-17)
+// DH_UBER_RT 0.19.3 (2024-11-17)
 //
 // This shader is free, if you paid for it, you have been ripped and should ask for a refund.
 //
@@ -117,7 +117,7 @@ namespace Deferred {
 
 #define S_PR MagFilter=POINT;MinFilter=POINT;MipFilter= POINT;AddressU=REPEAT;AddressV=REPEAT;AddressW=REPEAT;
 
-namespace DH_UBER_RT_0192 {
+namespace DH_UBER_RT_0193 {
 
     // Textures
 
@@ -356,7 +356,7 @@ namespace DH_UBER_RT_0192 {
                     "Lower=less ghosting, less performance\n"
                     "Higher=more ghosting, less noise, better performance\n"
                     "POSITIVE INPACT ON PERFORMANCES";
-    > = 1;
+    > = 0;
 #endif
 
 #if !OPTIMIZATION_ONE_LOOP_RT
@@ -438,7 +438,7 @@ namespace DH_UBER_RT_0192 {
 #if DX9_MODE
     > = 32;
 #else
-    > = 20;
+    > = 26;
 #endif
     
     uniform int iSmoothRadius <
@@ -461,9 +461,9 @@ namespace DH_UBER_RT_0192 {
                     "Higher=more ghosting in motion, less noise\n"
                     "/!\\ If motion detection is disable, decrease this to 3 except if you have a very high fps";
 #if DX9_MODE
-    > = 32;
+    > = 28;
 #else
-    > = 16;
+    > = 10;
 #endif
     
     uniform int iAOFrameAccu <
@@ -675,7 +675,7 @@ namespace DH_UBER_RT_0192 {
         ui_label = "Geometry correction mode";
         ui_items = "No correction\0Uniform\0Relative to center\0";
         ui_tooltip = "Try modifying this value is the relfection seems wrong";
-    > = 0;
+    > = 1;
     
     uniform float fSSRCorrectionStrength <
         ui_type = "slider";
@@ -2346,19 +2346,19 @@ namespace DH_UBER_RT_0192 {
         
     	float roughness = getRTF(coords).x;
         
+        [loop]
     	for(float s=0;s<sSamples;s+=1) {
 #if TEX_NOISE
 			rand = normalize(randomCouple(coords+(0.05*(s+1+framecount)))-0.5);
 #else
 			rand = normalize(randomTriple(coords,seed).xy-0.5);
 #endif
-		
-			if(s==0) rand = 0;
+
 			count += 1;
 			
 			for(int i=0;i<4;i++) {
 			
-				currentCoords = coords+float2(cos(rand.x*PI*2),sin(rand.x*PI*2))*pixelSize.xy*iSmoothRadius*s/sSamples;
+				currentCoords = coords+float2(cos(rand.x*PI*2),sin(rand.x*PI*2))*pixelSize.xy*saturate(1.0-roughness*5.0)*iSmoothRadius*s/sSamples;
 				if(i==1 || i==3) {
 					currentCoords.x += pixelSize.x;
 				}
@@ -2462,6 +2462,10 @@ namespace DH_UBER_RT_0192 {
         if(!firstPass) {
         	
 			float2 op = 1.0/float2(iGIFrameAccu,iAOFrameAccu);
+			if(iCheckerboardRT==1) op/=1.5;
+			else if(iCheckerboardRT==0) op/=2;
+			
+			op *= max(0.5,saturate(1.0-roughness*5.0));
 				
 			float3 color = getColor(coords).rgb;
 			float motionDist = 1+distance(coords*BUFFER_SIZE,previousCoords*BUFFER_SIZE);
@@ -2849,11 +2853,11 @@ namespace DH_UBER_RT_0192 {
 // TEHCNIQUES 
     
     technique DH_UBER_RT <
-        ui_label = "DH_UBER_RT 0.19.2";
+        ui_label = "DH_UBER_RT 0.19.3";
         ui_tooltip = 
             "_____________ DH_UBER_RT _____________\n"
             "\n"
-            " ver 0.19.2 (2024-11-17)  by AlucardDH\n"
+            " ver 0.19.3 (2024-11-17)  by AlucardDH\n"
 #if DX9_MODE
             "         DX9 limited edition\n"
 #endif
