@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// DH_UBER_RT 0.19.3 (2024-11-17)
+// DH_UBER_RT 0.19.4 (2024-11-18)
 //
 // This shader is free, if you paid for it, you have been ripped and should ask for a refund.
 //
@@ -117,7 +117,7 @@ namespace Deferred {
 
 #define S_PR MagFilter=POINT;MinFilter=POINT;MipFilter= POINT;AddressU=REPEAT;AddressV=REPEAT;AddressW=REPEAT;
 
-namespace DH_UBER_RT_0193 {
+namespace DH_UBER_RT_0194 {
 
     // Textures
 
@@ -179,10 +179,10 @@ namespace DH_UBER_RT_0193 {
     sampler giPass2Sampler { Texture = giPass2Tex;};
 
     texture giSmoothPassTex { Width = RENDER_WIDTH; Height = RENDER_HEIGHT; Format = RGBA8; };
-    sampler giSmoothPassSampler { Texture = giSmoothPassTex;};
+    sampler giSmoothPassSampler { Texture = giSmoothPassTex; };
     
     texture giPreviousAccuTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8; };
-    sampler giPreviousAccuSampler { Texture = giPreviousAccuTex;};
+    sampler giPreviousAccuSampler { Texture = giPreviousAccuTex;S_PR};
    
     texture giAccuTex { Width = INPUT_WIDTH; Height = INPUT_HEIGHT; Format = RGBA8;};
     sampler giAccuSampler { Texture = giAccuTex;};
@@ -296,9 +296,9 @@ namespace DH_UBER_RT_0193 {
         ui_category = "Common";
         ui_label = "Sky Depth";
         ui_min = 0.00; ui_max = 1.00;
-        ui_step = 0.01;
+        ui_step = 0.001;
         ui_tooltip = "Define where the sky starts to prevent if to be affected by the shader";
-    > = 0.99;
+    > = 0.999;
 
     uniform float fNormalRoughness <
         ui_type = "slider";
@@ -1739,7 +1739,8 @@ namespace DH_UBER_RT_0193 {
 		int subCoordsIndex = framecount%subMax;
         
         float depth = getDepth(coords);
-        if(depth>getSkyDepth()) {
+        bool isSky = depth>getSkyDepth();
+        if(isSky) {
             outGI = float4(0,0,0,1);
             outBestRay = 0.0;
             return;
@@ -1910,7 +1911,8 @@ namespace DH_UBER_RT_0193 {
     void PS_GILightPass2(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outGI : SV_Target0, out float4 outBestRay : SV_Target1) {
         
         float depth = getDepth(coords);
-        if(depth>getSkyDepth()) {
+        bool isSky = depth>getSkyDepth();
+        if(isSky) {
             outGI = float4(0,0,0,1);
             outBestRay = 0.0;
             return;
@@ -2187,6 +2189,8 @@ namespace DH_UBER_RT_0193 {
    	 }
         
         mergedGiColor.rgb = max(mergedGiColor.rgb,sky);
+        mergedGiColor.rgb = max(mergedGiColor.rgb,firstPassFrame.rgb);
+        
         outBestRay = bestRay;
         outGI = float4(mergedGiColor.rgb,ao);
     }
@@ -2306,8 +2310,10 @@ namespace DH_UBER_RT_0193 {
         }
         
         float refDepth = getDepth(coords);
-        if(refDepth>getSkyDepth()) {
-            outGI = float4(0,0,0,1);
+        float previousDepth = getColorSampler(previousDepthSampler,coords).x;
+        bool isSky = refDepth>getSkyDepth();
+        if(isSky) {
+            outGI = float4(getColor(coords).rgb,1);
 			outSSR = float4(0,0,0,1);
             return;
         }
@@ -2341,10 +2347,11 @@ namespace DH_UBER_RT_0193 {
         int2 delta;
         
         int extra = 0;
-        float hitSky = 0;
         float count = 0;
         
     	float roughness = getRTF(coords).x;
+        float radius = iSmoothRadius;
+        
         
         [loop]
     	for(float s=0;s<sSamples;s+=1) {
@@ -2358,7 +2365,7 @@ namespace DH_UBER_RT_0193 {
 			
 			for(int i=0;i<4;i++) {
 			
-				currentCoords = coords+float2(cos(rand.x*PI*2),sin(rand.x*PI*2))*pixelSize.xy*saturate(1.0-roughness*5.0)*iSmoothRadius*s/sSamples;
+				currentCoords = coords+float2(cos(rand.x*PI*2),sin(rand.x*PI*2))*pixelSize.xy*saturate(1.0-roughness*5.0)*radius*s/sSamples;
 				if(i==1 || i==3) {
 					currentCoords.x += pixelSize.x;
 				}
@@ -2368,12 +2375,14 @@ namespace DH_UBER_RT_0193 {
 			
 	            float depth = getDepth(currentCoords);
 				if(depth>getSkyDepth()) {
-					hitSky += 1.0;
-					continue;
+					depth = getColorSampler(previousDepthSampler,coords).x;
+					if(depth>getSkyDepth()) {
+						continue;
+					}
 				}
 				
 	            // Distance weight | gi,ao,ssr 
-	            float dist = distance(coords*BUFFER_SIZE,currentCoords*BUFFER_SIZE)/(1+iSmoothRadius);
+	            float dist = distance(coords*BUFFER_SIZE,currentCoords*BUFFER_SIZE)/(1+radius);
 	            float3 weight = sqrt(1.0/(1.0+sqrt(dist)));
 	            //weight /= (s+1);
 	
@@ -2402,6 +2411,9 @@ namespace DH_UBER_RT_0193 {
 	            
 				if(weight.x>0) {
 	                float4 curGiAo = getColorSampler(sourceGISampler,currentCoords);
+	                if(getBrightness(curGiAo.rgb)==0) {
+	                	weight.xy = 0;
+	                }
 	            
 	                gi += curGiAo.rgb*weight.x;
 	                sumAO += curGiAo.a*weight.y;
@@ -2466,14 +2478,16 @@ namespace DH_UBER_RT_0193 {
 			else if(iCheckerboardRT==0) op/=2;
 			
 			op *= max(0.5,saturate(1.0-roughness*5.0));
+			
+			
 				
 			float3 color = getColor(coords).rgb;
 			float motionDist = 1+distance(coords*BUFFER_SIZE,previousCoords*BUFFER_SIZE);
 			float3 dist = 0;
 			
 #if !DX9_MODE
-			float3 prevColor = getColorSampler(previousColorSampler,previousCoords).rgb;
-			dist = abs(color-prevColor);
+			float4 prevColor = getColorSampler(previousColorSampler,previousCoords);
+			dist = abs(color-prevColor.rgb);
 			if(minOf3(dist)>3.0/255.0) {
 				op = saturate(op*iGIFrameAccu*0.5);
 			}
@@ -2483,20 +2497,14 @@ namespace DH_UBER_RT_0193 {
 			op = saturate(op);
 			
 			
-			
 			float3 savedGi = gi;
 			
-			float4 previousColorMoved = getColorSampler(giPreviousAccuSampler,previousCoords); 
-			
-			float3 giSky = max(gi,previousColorMoved.rgb*(1.0-op.x));
-			float3 giNotSky = lerp(previousColorMoved.rgb,gi,op.x);
-			gi = lerp(giNotSky.rgb,giSky,saturate(2*hitSky/count));
-			
-			float aoSky = max(sumAO,previousColorMoved.a*(1.0-op.y));
-			float ao = lerp(previousColorMoved.a,sumAO,op.y);
-			sumAO = lerp(ao,aoSky,saturate(2*hitSky/count));
-    	
+			float4 previousColorMoved = getColorSampler(giPreviousAccuSampler,previousCoords);
+			float pb = getBrightness(previousColorMoved.rgb);
+			gi = pb>0 ? lerp(previousColorMoved.rgb,gi,op.x) : gi;
+			sumAO = pb>0 ? lerp(previousColorMoved.a,sumAO,op.y) : sumAO;
 	    	
+			
 	    	if(bSSR) {
 				float4 previousSSRm = getColorSampler(ssrPreviousAccuSampler,previousCoords);
 				float4 previousSSR = getColorSampler(ssrPreviousAccuSampler,coords);
@@ -2601,75 +2609,72 @@ namespace DH_UBER_RT_0193 {
         float3 color = refColor;
         float3 colorHSV = RGBtoHSV(color);
         
-        if(depth>getSkyDepth()) {
-            outResult = float4(color,1.0);
-            outGiAccu = 0;
-            outSsrAccu = 0;
-        } else {   
-            float originalColorBrightness = maxOf3(color);
+        bool isSky = depth>getSkyDepth();
+        float4 rtfs = getRTF(coords);
+        
+         
+        float originalColorBrightness = maxOf3(color);
 
-            if(bRemoveAmbient) {
-                color = filterAmbiantLight(color);
-            }
-            
-            float4 passColor = getColorSampler(giAccuSampler,coords);
-            
-            float3 gi = passColor.rgb;
-            float3 giHSV = RGBtoHSV(gi);
-            float giBrightness =  getBrightness(gi);            
-            colorHSV = RGBtoHSV(color);
-           
-            float colorBrightness = getBrightness(color);
-            	
-            // Base color
-            float3 result = color*(bBaseAlternative?1.0:fBaseColor);
-           // float p = getPureness(result);
-            
-            	
-            // GI
-            float avgB = getAverageBrightness();
-            if(fGIHueBiais>0 && giHSV.y>0 && giHSV.z>0) {
-            	float3 c = gi;
-            	c *= colorBrightness/giHSV.z;
-				result = lerp(result,c,saturate(fGIHueBiais*4*giHSV.y*(1.0-giHSV.z)*(1.0-colorHSV.y)));				
-			}
-        	result += 
-            	(
-					safePow(saturate(avgB+0.3),2)*fGILightMerging*2*(0.5+originalColorBrightness*0.5)
-					+safePow(1.0-saturate(avgB+0.3),2)*(0.2+smoothstep(1,0,safePow(colorBrightness,0.3))*0.8)*(fGIDarkMerging+smoothstep(1,0,colorBrightness)*fGIDarkMerging*2)*8
-					
-				)
-				*safePow(result+safePow(originalColorBrightness,0.2)*(1.0-originalColorBrightness)*0.25,2.0)
-				*(1.0-originalColorBrightness*originalColorBrightness)
-				*fGIFinalMerging
-				*gi
-				*(1+giHSV.y*0.25);
-				
-            
-        	// Overbright
-        	if(fGIOverbrightToWhite>0) {
-        		float b = maxOf3(result);
-	        	if(b>1) {
-	        		result += (b-1)*fGIOverbrightToWhite;
-	        	}
-        	}
-            
-            // Mixing
-            //result = lerp(color,result,fGIFinalMerging);
-            
-            // Apply AO after GI
-            {
-                float resultB = getBrightness(result);
-                float ao = passColor.a;
-                ao = computeAo(ao,resultB,giBrightness);
-                result *= ao;
-            }
-            
-            outResult = float4(saturate(result),1.0);
-            outGiAccu = passColor;
-            outSsrAccu = getColorSampler(ssrAccuSampler,coords);
-            
+        if(bRemoveAmbient) {
+            color = filterAmbiantLight(color);
         }
+        
+        float4 passColor = getColorSampler(giAccuSampler,coords);
+        
+        float3 gi = passColor.rgb;
+        float3 giHSV = RGBtoHSV(gi);
+        float giBrightness =  getBrightness(gi);            
+        colorHSV = RGBtoHSV(color);
+       
+        float colorBrightness = getBrightness(color);
+        	
+        // Base color
+        float3 result = color*(bBaseAlternative?1.0:fBaseColor);
+       // float p = getPureness(result);
+        
+        	
+        // GI
+        float avgB = getAverageBrightness();
+        if(fGIHueBiais>0 && giHSV.y>0 && giHSV.z>0) {
+        	float3 c = gi;
+        	c *= colorBrightness/giHSV.z;
+			result = lerp(result,c,saturate(fGIHueBiais*4*giHSV.y*(1.0-giHSV.z)*(1.0-colorHSV.y)));				
+		}
+    	result += 
+        	(
+				safePow(saturate(avgB+0.3),2)*fGILightMerging*2*(0.5+originalColorBrightness*0.5)
+				+safePow(1.0-saturate(avgB+0.3),2)*(0.2+smoothstep(1,0,safePow(colorBrightness,0.3))*0.8)*(fGIDarkMerging+smoothstep(1,0,colorBrightness)*fGIDarkMerging*2)*8
+				
+			)
+			*safePow(result+safePow(originalColorBrightness,0.2)*(1.0-originalColorBrightness)*0.25,2.0)
+			*(1.0-originalColorBrightness*originalColorBrightness)
+			*fGIFinalMerging
+			*gi
+			*(1+giHSV.y*0.25);
+			
+        
+    	// Overbright
+    	if(fGIOverbrightToWhite>0) {
+    		float b = maxOf3(result);
+        	if(b>1) {
+        		result += (b-1)*fGIOverbrightToWhite;
+        	}
+    	}
+        
+        // Mixing
+        //result = lerp(color,result,fGIFinalMerging);
+        
+        // Apply AO after GI
+        {
+            float resultB = getBrightness(result);
+            float ao = passColor.a;
+            ao = computeAo(ao,resultB,giBrightness);
+            result *= ao;
+        }
+        
+        outResult = float4(lerp(refColor,saturate(result),rtfs.a),1.0);
+        outGiAccu = passColor;
+        outSsrAccu = getColorSampler(ssrAccuSampler,coords);
     }
     
 
@@ -2853,11 +2858,11 @@ namespace DH_UBER_RT_0193 {
 // TEHCNIQUES 
     
     technique DH_UBER_RT <
-        ui_label = "DH_UBER_RT 0.19.3";
+        ui_label = "DH_UBER_RT 0.19.4";
         ui_tooltip = 
             "_____________ DH_UBER_RT _____________\n"
             "\n"
-            " ver 0.19.3 (2024-11-17)  by AlucardDH\n"
+            " ver 0.19.4 (2024-11-18)  by AlucardDH\n"
 #if DX9_MODE
             "         DX9 limited edition\n"
 #endif
