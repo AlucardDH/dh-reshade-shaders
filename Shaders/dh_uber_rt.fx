@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// DH_UBER_RT 0.19.4 (2024-11-18)
+// DH_UBER_RT 0.19.5 (2024-11-19)
 //
 // This shader is free, if you paid for it, you have been ripped and should ask for a refund.
 //
@@ -117,7 +117,7 @@ namespace Deferred {
 
 #define S_PR MagFilter=POINT;MinFilter=POINT;MipFilter= POINT;AddressU=REPEAT;AddressV=REPEAT;AddressW=REPEAT;
 
-namespace DH_UBER_RT_0194 {
+namespace DH_UBER_RT_0195 {
 
     // Textures
 
@@ -461,7 +461,7 @@ namespace DH_UBER_RT_0194 {
                     "Higher=more ghosting in motion, less noise\n"
                     "/!\\ If motion detection is disable, decrease this to 3 except if you have a very high fps";
 #if DX9_MODE
-    > = 28;
+    > = 16;
 #else
     > = 10;
 #endif
@@ -2310,7 +2310,6 @@ namespace DH_UBER_RT_0194 {
         }
         
         float refDepth = getDepth(coords);
-        float previousDepth = getColorSampler(previousDepthSampler,coords).x;
         bool isSky = refDepth>getSkyDepth();
         if(isSky) {
             outGI = float4(getColor(coords).rgb,1);
@@ -2375,10 +2374,14 @@ namespace DH_UBER_RT_0194 {
 			
 	            float depth = getDepth(currentCoords);
 				if(depth>getSkyDepth()) {
+#if DX9_MODE
+					continue;
+#else
 					depth = getColorSampler(previousDepthSampler,coords).x;
 					if(depth>getSkyDepth()) {
 						continue;
 					}
+#endif
 				}
 				
 	            // Distance weight | gi,ao,ssr 
@@ -2858,11 +2861,11 @@ namespace DH_UBER_RT_0194 {
 // TEHCNIQUES 
     
     technique DH_UBER_RT <
-        ui_label = "DH_UBER_RT 0.19.4";
+        ui_label = "DH_UBER_RT 0.19.5";
         ui_tooltip = 
             "_____________ DH_UBER_RT _____________\n"
             "\n"
-            " ver 0.19.4 (2024-11-18)  by AlucardDH\n"
+            " ver 0.19.5 (2024-11-19)  by AlucardDH\n"
 #if DX9_MODE
             "         DX9 limited edition\n"
 #endif
