@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// DH_Ambient_Remove 0.2.0
+// DH_Ambient_Remove 0.3.0
 //
 // This shader is free, if you paid for it, you have been ripped and should ask for a refund.
 //
@@ -34,7 +34,7 @@
 #define CENTER float2(0.5,0.5)
 //////////////////////////////////////////////////////////////////////////////
 
-namespace DH_Ambient_Remove {
+namespace DH_Ambient_Remove_030 {
 
 // Textures  
     
@@ -49,6 +49,13 @@ namespace DH_Ambient_Remove {
     uniform int random < source = "random"; min = 0; max = RANDOM_RANGE; >;
 
 // Parameters
+
+/// TEST
+/*
+	uniform bool bTest = true;
+	uniform bool bTest2 = true;
+	uniform bool bTest3 = true;
+*/
 
 /// DEBUG
     uniform int iDebug <
@@ -65,6 +72,19 @@ namespace DH_Ambient_Remove {
         ui_label = "Auto ambient color";
     > = true;
 
+    uniform float fRemoveAmbientAutoAntiFlicker <
+        ui_type = "slider";
+        ui_category = "Remove ambient light";
+        ui_label = "Compromise flicker/reactvity";
+        ui_min = 0; ui_max = 1.0;
+        ui_step = 0.001;
+    > = 1.0;
+    
+    uniform bool bRemoveAmbientAlternativeMode <
+        ui_category = "Remove ambient light";
+        ui_label = "Alternative mode";
+    > = true;
+
     uniform float3 cSourceAmbientLightColor <
         ui_type = "color";
         ui_category = "Remove ambient light";
@@ -77,7 +97,7 @@ namespace DH_Ambient_Remove {
         ui_label = "Strength";
         ui_min = 0; ui_max = 1.0;
         ui_step = 0.001;
-    > = 1.0;
+    > = 0.750;
     
     
     uniform bool bRemoveAmbientPreserveBrightness <
@@ -173,6 +193,9 @@ namespace DH_Ambient_Remove {
         float stepSize = BUFFER_WIDTH/16.0;
         float2 numSteps = size/(stepSize+1);
         
+        float3 sum = 0;
+        float weightSum = 0;
+        
             
         //float2 rand = randomCouple(currentCoords);
         for(int it=0;it<=4 && stepSize>=1;it++) {
@@ -182,6 +205,8 @@ namespace DH_Ambient_Remove {
                 for(currentCoords.y=bestCoords.y-stepDim.y*(numSteps.y/2);currentCoords.y<=bestCoords.y+stepDim.y*(numSteps.y/2);currentCoords.y+=stepDim.y) {
                     float3 color = getColor(currentCoords+rand*stepDim).rgb;
                     b = getBrightness(color);
+                    sum += color*(1.0-b);
+                    weightSum += 1.0-b;
                     if(b>0.1 && b<bestB) {
                         result = min(result,color);
                         bestB = b;
@@ -194,32 +219,43 @@ namespace DH_Ambient_Remove {
         }
         
         float opacity = b==1 ? 0 : (0.01+getPureness(result))*0.5;
-        outAmbient = float4(result,first ? 1 : opacity);
-        
+        outAmbient = float4(result,first ? 1 : opacity*fRemoveAmbientAutoAntiFlicker);
     }
     
     float3 getRemovedAmbiantColor() {
         if(bRemoveAmbientAuto) {
-            float3 color = getColorSampler(ambientSampler,float2(0.5,0.5)).rgb;
-            color += getBrightness(color);
-            return color;
+            return getColorSampler(ambientSampler,CENTER).rgb;
         } else {
             return cSourceAmbientLightColor;
         }
     }
     
+    float hueDist(float h1,float h2) {
+    	float d = h1<h2 
+			? min(h2-h1,1+h1-h2)
+			: min(h1-h2,1+h2-h1);
+		
+		return d;
+    }
+    
     float3 filterAmbiantLight(float3 sourceColor) {
         float3 color = sourceColor;
         float3 colorHSV = RGBtoHSV(color);
-        float3 ral = getRemovedAmbiantColor();
-        float3 removedTint = ral - minOf3(ral); 
+        float3 removed = getRemovedAmbiantColor();
+        float3 removedHSV = RGBtoHSV(removed);
+        float3 removedTint = removed - minOf3(removed); 
         float3 sourceTint = color - minOf3(color);
         
         float hueDist = maxOf3(abs(removedTint-sourceTint));
         
         float removal = saturate(1.0-hueDist*saturate(colorHSV.y+colorHSV.z));
-     color -= removedTint*removal;
-        color = saturate(color);
+        if(bRemoveAmbientAlternativeMode) {
+        	color -= removed*(1.0-hueDist)*fSourceAmbientIntensity*(1.0-colorHSV.z);
+        	color = saturate(color);
+        } else{
+        	color -= removedTint*removal;
+        	color = saturate(color);
+        }
         
         if(bRemoveAmbientPreserveBrightness) {
             float sB = getBrightness(sourceColor);
@@ -228,7 +264,7 @@ namespace DH_Ambient_Remove {
             color += sB-nB;
         }
         
-        color = lerp(sourceColor,color,fSourceAmbientIntensity);
+        if(!bRemoveAmbientAlternativeMode) color = lerp(sourceColor,color,fSourceAmbientIntensity);
         
         if(bAddAmbient) {
             float b = getBrightness(color);
@@ -256,7 +292,24 @@ namespace DH_Ambient_Remove {
             
             outColor = color;
         } else if(iDebug==DEBUG_COLOR) {
+        	if(coords.y>0.9) {
             outColor = float4(getRemovedAmbiantColor(),1.0);
+            } else {
+				float depth = ReShade::GetLinearizedDepth(coords);
+	            float4 color = getColor(coords);
+	
+	            bool filter = true;
+	            if(bIgnoreSky) {
+	                float depth = ReShade::GetLinearizedDepth(coords);
+	                filter = depth<=fSkyDepth;
+	            }
+	
+	            if(filter) {
+	                color.rgb = filterAmbiantLight(color.rgb);
+	            }
+	            
+	            outColor = color;
+            }
         } else {
             outColor = float4(0.0,0.0,0.0,1.0);
         }        
@@ -265,11 +318,11 @@ namespace DH_Ambient_Remove {
 // TEHCNIQUES 
     
     technique DH_Ambient_Remove <
-        ui_label = "DH_Ambient_Remove 0.2.0";
+        ui_label = "DH_Ambient_Remove 0.3.0";
         ui_tooltip = 
             "_____________ DH_Ambient_Remove _____________\n"
             "\n"
-            "         version 0.2.0 by AlucardDH\n"
+            "         version 0.3.0 by AlucardDH\n"
             "\n"
             "_____________________________________________";
     > {
