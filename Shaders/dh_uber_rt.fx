@@ -732,7 +732,7 @@ namespace DH_UBER_RT_01951 {
         
     uniform float fDistanceFading <
         ui_type = "slider";
-        ui_category = "Fianl Merging";
+        ui_category = "Final Merging";
         ui_label = "Distance fading";
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.01;
@@ -742,7 +742,7 @@ namespace DH_UBER_RT_01951 {
     
     uniform float fBaseColor <
         ui_type = "slider";
-        ui_category = "Fianl Merging";
+        ui_category = "Final Merging";
         ui_label = "Base color";
         ui_min = 0.0; ui_max = 2.0;
         ui_step = 0.01;
@@ -750,13 +750,13 @@ namespace DH_UBER_RT_01951 {
     > = 1.0;
     
     uniform bool bBaseAlternative <
-        ui_category = "Fianl Merging";
+        ui_category = "Final Merging";
         ui_label = "Base color alternative method";
     > = false;
 
     uniform int iBlackLevel <
         ui_type = "slider";
-        ui_category = "Fianl Merging";
+        ui_category = "Final Merging";
         ui_label = "Black level ";
         ui_min = 0; ui_max = 255;
         ui_step = 1;
@@ -764,7 +764,7 @@ namespace DH_UBER_RT_01951 {
     
     uniform int iWhiteLevel <
         ui_type = "slider";
-        ui_category = "Fianl Merging";
+        ui_category = "Final Merging";
         ui_label = "White level";
         ui_min = 0; ui_max = 255;
         ui_step = 1;
