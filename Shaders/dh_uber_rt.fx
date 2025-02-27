@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// DH_UBER_RT 0.20.4 (2025-02-20)
+// DH_UBER_RT 0.20.5 (2025-02-27)
 //
 // This shader is free, if you paid for it, you have been ripped and should ask for a refund.
 //
@@ -56,7 +56,7 @@
 #define DEBUG_AMBIENT 9
 #define DEBUG_THICKNESS 10
 
-#define RT_HIT_DEBUG_LIGHT 2.0
+#define RT_HIT_LIGHT 2.0
 #define RT_HIT 1.0
 #define RT_HIT_BEHIND 0.5
 #define RT_HIT_GUESS 0.25
@@ -82,6 +82,9 @@
 #define CENTER float2(0.5,0.5)
 #define S_PR MagFilter=POINT;MinFilter=POINT;MipFilter= POINT;AddressU=REPEAT;AddressV=REPEAT;AddressW=REPEAT;
 #define S_PC MagFilter=POINT;MinFilter=POINT;MipFilter= POINT;AddressU=Clamp;AddressV=Clamp;AddressW=Clamp;
+#if DX9_MODE
+	#define safePow(a,b) pow(a,b)
+#endif
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -99,7 +102,7 @@ namespace Deferred {
 #endif
 
 
-namespace DH_UBER_RT_0204 {
+namespace DH_UBER_RT_0205 {
 
 // Textures
 
@@ -136,8 +139,6 @@ namespace DH_UBER_RT_0204 {
     
     texture bestRayFillTex { Width = BUFFER_WIDTH/RESV_SCALE; Height = BUFFER_HEIGHT/RESV_SCALE; Format = RGBA16F; };
     sampler bestRayFillSampler { Texture = bestRayFillTex; S_PC};
-    texture previousBestRayTex { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA16F; };
-    sampler previousBestRaySampler { Texture = previousBestRayTex; S_PC};
    
 #if SHPERE
     texture previousSphereTex { Width = BUFFER_WIDTH/SPHERE_RATIO; Height = BUFFER_HEIGHT/SPHERE_RATIO; Format = RGBA8; };
@@ -149,7 +150,7 @@ namespace DH_UBER_RT_0204 {
 
     texture normalTex { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA16F; };
     sampler normalSampler { Texture = normalTex; S_PC};
-    
+
     texture resultTex { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA8; MipLevels = 6;  };
     sampler resultSampler { Texture = resultTex; MinLOD = 0.0f; MaxLOD = 5.0f;};
     
@@ -193,6 +194,8 @@ namespace DH_UBER_RT_0204 {
     struct RTOUT {
         float3 wp;
         float status;
+        float4 drtf;
+        float dist;
     };
     
 
@@ -369,6 +372,7 @@ namespace DH_UBER_RT_0204 {
         ui_step = 0.001;
     > = 0.333;
     
+#if !DX9_MODE
     uniform int iRTMaxRays <
         ui_type = "slider";
         ui_category = "GI/AO: 1st Pass (New rays)";
@@ -380,6 +384,9 @@ namespace DH_UBER_RT_0204 {
                     "Higher=Less noise, brighter image\n"
                     "/!\\ HAS A BIG INPACT ON PERFORMANCES";
     > = 2;
+#else
+	#define iRTMaxRays 1
+#endif
 
     uniform float fGIAvoidThin <
         ui_type = "slider";
@@ -389,6 +396,7 @@ namespace DH_UBER_RT_0204 {
         ui_min = 0.0; ui_max = 1.0;
         ui_step = 0.001;
     > = 0.750;
+
 
     uniform int iHudBorderProtectionRadius <
         ui_type = "slider";
@@ -404,9 +412,10 @@ namespace DH_UBER_RT_0204 {
         ui_category = "GI/AO: 1st Pass (New rays)";
         ui_label = "Avoid HUD: Strength";
         ui_tooltip = "Reduce chances of detecting large lights from the HUD. Disable if you're using REST or if HUD is hidden";
-        ui_min = 0.0; ui_max = 8.0;
+        ui_min = 0.0; ui_max = 16.0;
         ui_step = 0.01;
-    > = 4.0;
+    > = 16;
+
         
 #if !DX9_MODE    
     uniform int iMemRadius <
@@ -526,7 +535,7 @@ namespace DH_UBER_RT_0204 {
         ui_min = 0; ui_max = 1.0;
         ui_step = 0.01;
         ui_tooltip = "Brighten dark colors, useful in dark corners";
-    > = 0.0;
+    > = 0.1;
     
     uniform float fGIBounce <
         ui_type = "slider";
@@ -778,6 +787,7 @@ namespace DH_UBER_RT_0204 {
     > = 255;
     
 // Debug light
+#if !DX9_MODE
     uniform bool bDebugLight <
         ui_type = "color";
         ui_category = "Debug Light";
@@ -819,7 +829,7 @@ namespace DH_UBER_RT_0204 {
         ui_category = "Debug Light";
         ui_label = "Z at screen depth";
     > = true;
-
+#endif
 
     
 // FUCNTIONS
@@ -830,24 +840,29 @@ namespace DH_UBER_RT_0204 {
     
     float2 upCoords(float2 coords) {
     	float2 result = coords/fGIRenderScale;
+#if!DX9_MODE
     	int steps = ceil(1.0/fGIRenderScale);
     	int count = steps*steps;
     	int index = random%count;
     	int2 delta = int2(index/steps,index%steps)-steps/2;
     	result += delta*ReShade::PixelSize;
+#endif
     	return result;
     }
     
     float2 upCoordsSSR(float2 coords) {
     	float2 result = coords/fSSRRenderScale;
+#if!DX9_MODE
     	int steps = ceil(1.0/fSSRRenderScale);
     	int count = steps*steps;
     	int index = random%count;
     	int2 delta = int2(index/steps,index%steps)-steps/2;
     	result += delta*ReShade::PixelSize;
+#endif
     	return result;
     }
 
+#if!DX9_MODE
     float safePow(float value, float power) {
         return pow(abs(value),power);
     }
@@ -855,6 +870,7 @@ namespace DH_UBER_RT_0204 {
     float3 safePow(float3 value, float power) {
         return pow(abs(value),power);
     }
+#endif
     
 // Colors
     float3 RGBtoHSV(float3 c) {
@@ -888,50 +904,50 @@ namespace DH_UBER_RT_0204 {
     float3 RGBtoOKL(float3 rgb) {
 
         // Step 1: Linearize RGB
-        float3 linearRGB = rgb <= 0.04045 ? rgb / 12.92 : pow((rgb + 0.055) / 1.055, 2.4);
+        float3 r = rgb <= 0.04045 ? rgb / 12.92 : pow((rgb + 0.055) / 1.055, 2.4);
 
         // Step 2: Linear RGB to LMS
-        float3 lms = mul(float3x3(
+        r = mul(float3x3(
             0.4122214708, 0.5363325363, 0.0514459929,
             0.2119034982, 0.6806995451, 0.1073969566,
             0.0883024619, 0.2817188376, 0.6299787005
-        ), linearRGB);
+        ), r);
 
         // Step 3: Non-linear transformation (cube root)
-        float3 lms_nl = pow(lms, 1.0 / 3.0);
+        r = pow(r, 1.0 / 3.0);
 
         // Step 4: LMS to OKLab
-        float3 oklab = mul(float3x3(
+        r = mul(float3x3(
             0.2104542553, 0.7936177850, -0.0040720468,
             1.9779984951, -2.4285922050, 0.4505937099,
             0.0259040371, 0.7827717662, -0.8086757660
-        ), lms_nl);
+        ), r);
 
-        return oklab;
+        return r;
     }
 
     float3 OKLtoRGB(float3 oklab) {
         // Step 1: OKLab to LMS
-        float3 lms_nl = mul(float3x3(
+        float3 r = mul(float3x3(
             1.0, 0.3963377774, 0.2158037573,
             1.0, -0.1055613458, -0.0638541728,
             1.0, -0.0894841775, -1.2914855480
         ), oklab);
 
         // Step 2: Reverse Non-linear transformation (cube)
-        float3 lms = lms_nl * lms_nl * lms_nl;
+        r = r * r * r;
 
         // Step 3: LMS to linear RGB
-        float3 linearRGB = mul(float3x3(
+        r = mul(float3x3(
             4.0767416621, -3.3077115913, 0.2309699292,
             -1.2684380046, 2.6097574011, -0.3413193965,
             -0.0041960863, -0.7034186147, 1.7076147010
-        ), lms);
+        ), r);
 
         // Step 4: De-linearize RGB
-        float3 rgb = linearRGB <= 0.0031308 ? linearRGB * 12.92 : 1.055 * pow(linearRGB, 1.0 / 2.4) - 0.055;
+        r = r <= 0.0031308 ? r * 12.92 : 1.055 * pow(r, 1.0 / 2.4) - 0.055;
 
-        return rgb;
+        return r;
     }
 
 
@@ -1035,12 +1051,20 @@ namespace DH_UBER_RT_0204 {
 
 
 // Vector operations
+    
+    float2 nextRand(float2 rand) {
+        return  frac(abs(rand+PI)*PI);
+    }
+    float3 nextRand(float3 rand) {
+        return frac(abs(rand+PI)*PI);
+    }
+
+#if !TEX_NOISE
     int getPixelIndex(float2 coords,int2 size) {
         int2 pxCoords = coords*size;
         return pxCoords.x+pxCoords.y*size.x+random;
     }
 
-#if !TEX_NOISE
     float randomValue(inout uint seed) {
         seed = seed * 747796405 + 2891336453;
         uint result = ((seed>>((seed>>28)+4))^seed)*277803737;
@@ -1050,18 +1074,21 @@ namespace DH_UBER_RT_0204 {
 #endif
 
     float2 randomCouple(float2 coords) {
-        float2 v = 0;
 #if TEX_NOISE
+/*
         int2 offset = int2((framecount*random*SQRT2),(framecount*random*PI))%512;
         float2 noiseCoords = ((offset+coords*BUFFER_SIZE)%512)/512;
-        v = abs((getColorSampler(blueNoiseSampler,noiseCoords).rg-0.5)*2.0);
+        return abs((getColorSampler(blueNoiseSampler,noiseCoords).rg-0.5)*2.0);
+        */
+        return getColorSampler(blueNoiseSampler,coords).rg;
 #else
         uint seed = getPixelIndex(coords,BUFFER_SIZE);
 
+		float2 v = 0;
         v.x = randomValue(seed);
         v.y = randomValue(seed);
-#endif
         return v;
+#endif
     }
     
 #if TEX_NOISE
@@ -1076,24 +1103,21 @@ namespace DH_UBER_RT_0204 {
 #endif
 
     float3 randomTriple(float2 coords) {
-        float3 v = 0;
 #if TEX_NOISE
+/*
         int2 offset = int2((framecount*random*SQRT2),(framecount*random*PI))%512;
         float2 noiseCoords = ((offset+coords*BUFFER_SIZE)%512)/512;
-        v = getColorSampler(blueNoiseSampler,noiseCoords).rgb;
+        return getColorSampler(blueNoiseSampler,noiseCoords).rgb;
+        */
+        return getColorSampler(blueNoiseSampler,coords).rgb;
 #else
-        uint seed = getPixelIndex(coords,BUFFER_SIZE)+random+framecount;
-        v = randomTriple(coords,seed);
+        uint seed = getPixelIndex(coords,BUFFER_SIZE);
+        return randomTriple(coords,seed);
 #endif
-        return v;
     }
     
     float4 getRayColor(float2 coords) {
         return getColorSampler(rayColorSampler,coords);
-    }
-    
-    bool isEmpty(float3 v) {
-        return maxOf3(v)==0;
     }
 
 // PS
@@ -1186,7 +1210,7 @@ namespace DH_UBER_RT_0204 {
         float depth;
         float2 currentCoords;
         
-        float2 orientation = normalize(randomCouple(coords*PI)-0.5);
+        float2 orientation = normalize(randomCouple(coords)-0.5);
         
         bool validPos = true;
         bool validNeg = true;
@@ -1255,8 +1279,8 @@ namespace DH_UBER_RT_0204 {
         float2 previousDepth2 = getColorSampler(previousDepthSampler,coords).xy;
         
         float mask = 0;
-        if(depth.x>previousDepth.x+0.2*depth.x) mask = 1;
-        if(depth.x>previousDepth2.x+0.2*depth.x) mask = 1;
+        if(depth.x>previousDepth.x+0.1*depth.x) mask = 1;
+        if(depth.x>previousDepth2.x+0.1*depth.x) mask = 1;
         outMask = float4(mask,0,0,1);
     } 
     
@@ -1272,7 +1296,6 @@ namespace DH_UBER_RT_0204 {
         float4 previousRTFS = getColorSampler(previousRTFSampler,previousCoords);
         RTFS.y = lerp(previousRTFS.y,RTFS.y,0.33);
         RTFS.a = min(RTFS.a,0.1+previousRTFS.a);
-
         
         RTFS.z = 1;
         
@@ -1303,7 +1326,6 @@ namespace DH_UBER_RT_0204 {
         
         float2 currentCoords = 0;
         float2 bestCoords = CENTER;
-        float2 rand = randomCouple(coords);
         
         float2 size = BUFFER_SIZE;
         float stepSize = BUFFER_WIDTH/16.0;
@@ -1312,12 +1334,14 @@ namespace DH_UBER_RT_0204 {
         float avgBrightness = 0;
         int count = 0;
             
-        //float2 rand = randomCouple(currentCoords);
+        float2 rand = randomCouple(coords);
+        [loop]
         for(int it=0;it<=4 && stepSize>=1;it++) {
             float2 stepDim = stepSize/BUFFER_SIZE;
-        
+        	[loop]
             for(currentCoords.x=bestCoords.x-stepDim.x*(numSteps.x/2);currentCoords.x<=bestCoords.x+stepDim.x*(numSteps.x/2);currentCoords.x+=stepDim.x) {
-                for(currentCoords.y=bestCoords.y-stepDim.y*(numSteps.y/2);currentCoords.y<=bestCoords.y+stepDim.y*(numSteps.y/2);currentCoords.y+=stepDim.y) {
+    			[loop]            
+				for(currentCoords.y=bestCoords.y-stepDim.y*(numSteps.y/2);currentCoords.y<=bestCoords.y+stepDim.y*(numSteps.y/2);currentCoords.y+=stepDim.y) {
                    float2 c = currentCoords+rand*stepDim;
                     float3 color = getColor(c).rgb;
                     b = maxOf3(color);
@@ -1453,6 +1477,7 @@ namespace DH_UBER_RT_0204 {
         
     }
     
+    
     float3 rampColor(float3 color) {    
         float3 okl = RGBtoOKL(color);
         float b = okl.x;
@@ -1512,7 +1537,7 @@ namespace DH_UBER_RT_0204 {
         }
         
         if(fSaturationBoost>0 && refHSV.z*refHSV.y>0.1) {
-            refHSV.y = saturate(refHSV.y+fSaturationBoost);
+            refHSV.y = lerp(refHSV.y,saturate(refHSV.y+fSaturationBoost),refHSV.y);
             refColor = HSVtoRGB(refHSV);
         }
         
@@ -1527,7 +1552,7 @@ namespace DH_UBER_RT_0204 {
         if(fGIDarkAmplify>0) {
             float3 okl = RGBtoOKL(result);
             float avgB = getAverageBrightness();
-            okl.x = saturate(okl.x+fGIDarkAmplify*(1.0-avgB)*okl.x*(1.0-okl.x)*10);
+            okl.x = saturate(okl.x+fGIDarkAmplify*(1.0-okl.x));
             result = OKLtoRGB(okl);
         }
         
@@ -1560,6 +1585,7 @@ namespace DH_UBER_RT_0204 {
         
         int count = 0;
         float2 v = normalize(coords - 0.5)/iTest;
+        [loop]
         for(int i=1;i<=iTest;i++) {
             float2 c = 0.5+v*i;
             if(!isSaturated(c)) {
@@ -1592,68 +1618,43 @@ namespace DH_UBER_RT_0204 {
         return  0;
     }
     
-    bool hit(float3 currentWp, float3 screenWp, float depth, float thickness,float3 behindWp) {
-        if(fGIAvoidThin>0 && thickness<depth*100*fGIAvoidThin) return false;
+    bool hit(float3 currentWp, float3 screenWp, float4 drtf,float3 behindWp) {
+        if(fGIAvoidThin>0 && drtf.z<drtf.x*100*fGIAvoidThin) return false;
         if(currentWp.z>=screenWp.z) {
             if(currentWp.z<=behindWp.z+distance(screenWp,behindWp)*2.0) return true;
             if(currentWp.z<=screenWp.z+2*abs(behindWp.z-screenWp.z)) return true;
-            if(currentWp.z<=screenWp.z+thickness*saturate(depth*2)) return true;
+            if(currentWp.z<=screenWp.z+drtf.z*saturate(drtf.x*2)) return true;
         }
         return false;
     }
-    
+
+#if !DX9_MODE
     float3 getDebugLightWp() {
         return getWorldPosition(fDebugLightPosition.xy,bDebugLightZAtDepth ? getDepth(fDebugLightPosition.xy).x*0.99 : fDebugLightPosition.z);
-    }       
-
-    bool hitLight(float3 refWp, float3 currentWp,float3 targetWp) {
-        float sourceDist = distance(refWp,currentWp);
-        float targetDist = distance(refWp,targetWp);
-        return sourceDist>=targetDist-iDebugLightSize*2;
     }
+#endif
     
-    bool isBehind(float3 refWp,float3 refNormal, float3 hitWp) {
-        return distance(refWp-refNormal*0.5,hitWp)>distance(refWp,hitWp);
-    }
-    
-    RTOUT trace(float3 refWp,float3 incrementVector,bool ssr,bool lightTarget,float3 targetWp) {
+    RTOUT traceGI(inout float2 rand, float3 refWp,float3 incrementVector) {
     
         RTOUT result;
         result.status = RT_MISSED;
         
         float3 currentWp = refWp;
         
-        incrementVector = normalize(incrementVector)*0.1;
+        incrementVector = normalize(incrementVector)*(0.05+abs(rand.x)*0.05);
                 
         currentWp += incrementVector;
         float3 screenCoords = getScreenPosition(currentWp);
-        float3 screenWp = getWorldPositionForNormal(screenCoords.xy,true);
+        result.drtf = getDRTF(screenCoords.xy);
+        float3 screenWp = getWorldPosition(screenCoords.xy,result.drtf.x);
         
-        float4 DRTF = getDRTF(screenCoords.xy);
-        float4 refDRTF = DRTF;
         
-        bool isHit = hit(currentWp, screenWp, DRTF.x,DRTF.z,0);
-        
-        if(isHit && !ssr && !lightTarget) {
-            incrementVector = -incrementVector;
-            currentWp += 2*incrementVector;
-            screenCoords = getScreenPosition(currentWp);
-            screenWp = getWorldPositionForNormal(screenCoords.xy,true);
-            DRTF = getDRTF(screenCoords.xy);
-            isHit = hit(currentWp, screenWp, DRTF.x,DRTF.z,0);
-        }
-        
-        if(isHit && ssr) {
-            float3 hitNormal = getNormal(screenCoords.xy);
-            incrementVector = reflect(incrementVector,hitNormal);
-            isHit = false;
-        }
-        
-        if(isHit) {
+        if(hit(currentWp, screenWp, result.drtf,0)) {
             result.wp = screenWp;
             result.status = RT_MISSED_FAST;              
             return result;
         }
+        
         
         
         float3 refVector = normalize(incrementVector);
@@ -1663,33 +1664,27 @@ namespace DH_UBER_RT_0204 {
         bool behind = false;
         float3 behindWp = 0;
         float3 previousScreenWp = refWp;
-#if !DX9_MODE
-        float3 beforeBehind = 0;
-        float3 previousWp = refWp;
-        float3 previousNormal = getNormal(screenCoords.xy);
-#endif
  
         int step = -1;
         incrementVector *= 0.1;
         
-        float maxDist = lightTarget ? distance(currentWp,targetWp) : sqrt(BUFFER_WIDTH*BUFFER_WIDTH+BUFFER_HEIGHT*BUFFER_HEIGHT);
-        int maxSteps = ssr?256:16*(iRTPrecision>1?32:1);
-        float2 rand = randomCouple(screenCoords.xy);
-        float dist = 0;
+        float maxDist = sqrt(BUFFER_WIDTH*BUFFER_WIDTH+BUFFER_HEIGHT*BUFFER_HEIGHT);
+        int maxSteps = 16*(iRTPrecision>1?32:1);
+
+        result.dist = 0;
         
-        while(step<maxSteps*2 && dist<maxDist) {
+        while(step<maxSteps*2 && result.dist<maxDist) {
             step++;
             if(step>maxSteps) incrementVector *= 1.05;
 
-            dist += length(incrementVector);
+            result.dist += length(incrementVector);
             currentWp += incrementVector;
             screenCoords = getScreenPosition(currentWp);
             
             if(!inScreen(screenCoords)) break;
             
-            
-            DRTF = getDRTF(screenCoords.xy);
-            screenWp = getWorldPosition(screenCoords.xy,DRTF.x);
+            result.drtf = getDRTF(screenCoords.xy);
+            screenWp = getWorldPosition(screenCoords.xy,result.drtf.x);
             bool previousBehind = behind;
             behind = currentWp.z>screenWp.z;
             
@@ -1697,42 +1692,28 @@ namespace DH_UBER_RT_0204 {
                 stepBehind++;
                 if(stepBehind==1) {
                     behindWp = screenWp;
-#if !DX9_MODE
-                    beforeBehind = previousWp;
-#endif
                 }
             }
             
-            if(isSky(DRTF.x)) {
+            if(isSky(result.drtf.x)) {
                 result.status = RT_HIT_SKY;
                 result.wp = currentWp;
             }
             
-            isHit = hit(currentWp, screenWp, DRTF.x,DRTF.z,behindWp);
-            bool isHitBehind = isHit && (stepBehind>1 || (currentWp.z>=screenWp.z+50 && DRTF.z>=50));
-        
+            bool isHit = hit(currentWp, screenWp, result.drtf,behindWp);
+            
             if(isHit) {
-                result.status = isHitBehind ? RT_HIT_BEHIND : RT_HIT;
-#if !DX9_MODE
-                result.wp = result.status==RT_HIT_BEHIND ? (ssr ? beforeBehind : behindWp) : currentWp;
-#else
-				result.wp = result.status==RT_HIT_BEHIND ? behindWp : currentWp;
-#endif
-                if(ssr && (DRTF.y>=0.1 || refDRTF.y>=0.05)) result.status = RT_HIT;
+                bool isHitBehind = stepBehind>1 || (currentWp.z>=screenWp.z+50 && result.drtf.z>=50);
+        		result.status = isHitBehind ? RT_HIT_BEHIND :  RT_HIT;
+                result.wp = result.status==RT_HIT_BEHIND ? behindWp : currentWp;
                 return result;
             }
             
 #if !DX9_MODE
             if(iRTPrecision==1) {
-                rand = randomCouple(screenCoords.xy);
-                if(ssr) {
-                    if(step<=maxSteps) {
-                        incrementVector = refVector*(1.0+rand.x);
-                    }
-                } else  {
-                    float l = 1.00+DRTF.x+rand.y;
-                    incrementVector *= l;
-                }
+                rand = nextRand(rand);
+                float l = 1.00+result.drtf.x+rand.y;
+                incrementVector *= l;
             } else 
 #endif
 			if(step<=maxSteps) {
@@ -1745,44 +1726,148 @@ namespace DH_UBER_RT_0204 {
                 
                 // On prend la plus petite distance positive
                 float minDist = min(dist.x, dist.y);
-                incrementVector = refVector*max(iRTPrecision<3 && !ssr?pow(float(step)/maxSteps,2)*1000:0,minDist*(1.0+DRTF.x*2.5));
+                incrementVector = refVector*max(iRTPrecision<3?pow(float(step)/maxSteps,2)*1000:0,minDist*(1.0+result.drtf.x*2.5));
             }
             
             
             if(!behind) {
                 stepBehind = 0;
             }
+
+            previousScreenWp = screenWp;
+            //dist = distance(refWp,currentWp);
+        }
+        
+        return result;
+    }
+    
+	RTOUT traceGItarget(inout float2 rand, float3 refWp,float3 incrementVector,float3 targetWp) {
+    
+        RTOUT result;
+        result.status = RT_MISSED;
+        
+        float3 currentWp = refWp;
+        
+        incrementVector = normalize(incrementVector)*(0.05+abs(rand.x)*0.05);
+                
+        currentWp += incrementVector;
+        float3 screenCoords = getScreenPosition(currentWp);
+        result.drtf = getDRTF(screenCoords.xy);
+        float3 screenWp = getWorldPosition(screenCoords.xy,result.drtf.x);
+        
+        
+        if(hit(currentWp, screenWp, result.drtf,0)) {
+            result.wp = screenWp;
+            result.status = RT_MISSED_FAST;              
+            return result;
+        }
+        
+        
+        
+        float3 refVector = normalize(incrementVector);
+        incrementVector = refVector;
+        
+        int stepBehind = 0;
+        bool behind = false;
+        float3 behindWp = 0;
+        float3 previousScreenWp = refWp;
+ 
+        int step = -1;
+        incrementVector *= 0.1;
+        
+        float maxDist = distance(currentWp,targetWp);
+        int maxSteps = 16*(iRTPrecision>1?32:1);
+
+        result.dist = 0;
+        
+        while(step<maxSteps*2 && result.dist<maxDist) {
+            step++;
+            if(step>maxSteps) incrementVector *= 1.05;
+
+            result.dist += length(incrementVector);
+            currentWp += incrementVector;
+            screenCoords = getScreenPosition(currentWp);
+            
+            if(!inScreen(screenCoords)) break;
+            
+            result.drtf = getDRTF(screenCoords.xy);
+            screenWp = getWorldPosition(screenCoords.xy,result.drtf.x);
+            bool previousBehind = behind;
+            behind = currentWp.z>screenWp.z;
+            
+            if(behind) {
+                stepBehind++;
+                if(stepBehind==1) {
+                    behindWp = screenWp;
+                }
+            }
+            
+            if(isSky(result.drtf.x)) {
+                result.status = RT_HIT_SKY;
+                result.wp = currentWp;
+            }
+            
+            bool isHit = hit(currentWp, screenWp, result.drtf,behindWp);
+            
+            if(isHit) {
+                bool isHitBehind = stepBehind>1 || (currentWp.z>=screenWp.z+50 && result.drtf.z>=50);
+        		result.status = isHitBehind ? RT_HIT_BEHIND : (result.dist>=maxDist-2 ? RT_HIT_LIGHT : RT_HIT);
+                result.wp = result.status==RT_HIT_BEHIND ? behindWp : currentWp;
+                return result;
+            }
             
 #if !DX9_MODE
-            previousWp = currentWp;
+            if(iRTPrecision==1) {
+                rand = nextRand(rand);
+                float l = 1.00+result.drtf.x+rand.y;
+                incrementVector *= l;
+            } else 
 #endif
+			if(step<=maxSteps) {
+                float2 nextWp = float2(
+                    refVector.x>0 ? ceil(currentWp.x+1) : floor(currentWp.x-1),
+                    refVector.y>0 ? ceil(currentWp.y+1) : floor(currentWp.y-1)
+                );
+                
+                float2 dist = abs(nextWp.xy-currentWp.xy);
+                
+                // On prend la plus petite distance positive
+                float minDist = min(dist.x, dist.y);
+                incrementVector = refVector*max(iRTPrecision<3?pow(float(step)/maxSteps,2)*1000:0,minDist*(1.0+result.drtf.x*2.5));
+            }
+            
+            
+            if(!behind) {
+                stepBehind = 0;
+            }
+
             previousScreenWp = screenWp;
             //dist = distance(refWp,currentWp);
         }
 
-//#if !DX9_MODE  
-        if(lightTarget) {
-            result.status = RT_HIT;
-            result.wp = targetWp;
-        }
-//#endif
-
-        if(ssr && incrementVector.z>0 && inScreen(getScreenPosition(currentWp).xy)) {
-            result.status = RT_HIT;
-            result.wp = currentWp;
-        }
+        result.status = RT_HIT_LIGHT;
+        result.wp = targetWp;
         
         return result;
     }
 
 // GI
+
+	float weightLight(float3 color) {
+#if !DX9_MODE
+		float3 hsv = RGBtoHSV(color);
+		return (1+hsv.y)*hsv.z*0.5;
+#else
+		return maxOf3(color);
+#endif
+	}
     
     void handleHit(
-        in float3 refWp, in bool doTargetLight, in float4 targetColor, in float3 targetWp , in RTOUT hitPosition, 
-        inout float3 sky, inout float4 bestRay, inout float sumAO, inout int hits, inout float4 mergedGiColor,
-        in out float missRays
+        in bool doTargetLight, in float3 targetColor, in RTOUT hitPosition, 
+        inout float3 sky, inout float4 bestRay, inout float sumAO, inout int hits, inout float3 mergedGiColor,
+        inout float missRays
     ) {
-    	if(hitPosition.status == RT_MISSED_FAST) {
+    	if(hitPosition.status <= RT_MISSED) {
     		return;
     	}
     	
@@ -1792,129 +1877,91 @@ namespace DH_UBER_RT_0204 {
     		return;
     	}
         
-        float4 giColor = 0.0;
         
         if(hitPosition.status==RT_HIT_SKY || isSky(screenCoords.z)) {
-            giColor = doTargetLight ? targetColor : getRayColor(screenCoords.xy);
-            float b = getBrightness(giColor.rgb);
-            if(b>0) {
-                sky = max(sky,giColor.rgb);
-            }
+            float3 giColor = doTargetLight ? targetColor.rgb : getRayColor(screenCoords.xy).rgb;
+            float b = getBrightness(giColor);
+            sky = max(sky,giColor.rgb);
             
             hits++;
             sumAO+=1;
             
             return;
-        } 
+        }
+        
+        
+        float4 DRTF = getDRTF(screenCoords.xy);  
+        if((hitPosition.dist>0 || doTargetLight) && (fGIAvoidThin==0 || DRTF.z>DRTF.x*100*fGIAvoidThin)) {
+            float ao = 2.0*hitPosition.dist/(iAODistance*screenCoords.z*getDepthMultiplier());
+            sumAO += saturate(ao);
+            hits+=1.0;
+        }
+        
+        if(hitPosition.status==RT_HIT_BEHIND) {
 
-		if(hitPosition.status <= RT_MISSED) {
             if(doTargetLight) {
-                giColor = getRayColor(screenCoords.xy);
+                float3 giColor = getRayColor(screenCoords.xy).rgb;
                 
                 float hitB = getBrightness(giColor.rgb);
                 float targetB = getBrightness(targetColor.rgb);
                 if(hitB<targetB && targetB>0.3) {
-                    missRays += targetB;
-                    if(targetB>=bestRay.a) {
-                        bestRay = float4(screenCoords,targetB);
-                    } 
-                    
+                    missRays += targetB*2;
                 }
+                hitB = weightLight(giColor.rgb);
+                if(hitB>bestRay.a) {
+                    bestRay = float4(screenCoords,hitB);
+                } 
                 giColor = 0;
             }
-            
             return;
             
         } 
-
-		if(hitPosition.status>=0 ) {
         
-            float mul = 1;
-            float b = 1;
         
-            float dist = distance(hitPosition.wp,refWp);
-            bool behind = hitPosition.status==RT_HIT_BEHIND;
-                
-            if(behind) {
-
-                //giColor = float3(0,0,1);
-                if(doTargetLight) {
-                    giColor = getRayColor(screenCoords.xy);
-                    
-                    float hitB = getBrightness(giColor.rgb);
-                    float targetB = getBrightness(targetColor.rgb);
-                    if(hitB<targetB && targetB>0.3) {
-                        missRays += targetB*2; 
-                        if(targetB>=bestRay.a) {
-                            bestRay = float4(screenCoords,targetB);
-                        } 
-                    }
-                    giColor = 0;
-                }
-                
-            } else {
-                bool hitTargetLight = doTargetLight && hitLight(refWp, hitPosition.wp,targetWp);
-                if(doTargetLight) {
-                    if(hitTargetLight) {
-                        giColor = targetColor;
-                        
-                    } else if(!bDebugLight || !bDebugLightOnly) {
-                        giColor = getRayColor(screenCoords.xy);
-                        
-                        float hitB = getBrightness(giColor.rgb);
-                        float targetB = getBrightness(targetColor.rgb);
-                        if(hitB<targetB && targetB>0.3) {
-                            missRays += targetB*2;
-                            if(targetB>=bestRay.a) {
-                                bestRay = float4(screenCoords,targetB);
-                            } 
-                        }
-                        // hit something before
-                    }
-                } else {
-                    giColor = getRayColor(screenCoords.xy);
-                }
-                
-                if(doTargetLight) {
-                    //dist /= 0.5+targetColor.a*screenCoords.z;
-                    mul /= max(1.0,pow(fGIDistanceAttenuation,8.0)*30*dist);
-            
-                    giColor.rgb = RGBtoOKL(giColor.rgb);
-                    giColor.x *= mul;
-                    giColor.rgb = OKLtoRGB(giColor.rgb);
-                }
-                
-                
-                b = getBrightness(giColor.rgb);
-                
-                if(b>=bestRay.a && !doTargetLight) {
-                    bestRay = float4(screenCoords,b);
-                }
+        float3 giColor;
+        if(doTargetLight) {
+            if(hitPosition.status==RT_HIT_LIGHT) {
+                giColor = targetColor.rgb;
                 
             }
-
-            float4 DRTF = getDRTF(screenCoords.xy);  
-            if((dist>0 || doTargetLight) && (fGIAvoidThin==0 || DRTF.z>DRTF.x*100*fGIAvoidThin)) {
-                float ao = 2.0*dist/(iAODistance*screenCoords.z*getDepthMultiplier());
-                if(doTargetLight) {
-                    float maxDist = distance(targetWp,refWp);
-                    ao = min(ao,lerp(1,safePow(dist/maxDist,10),b));
+#if !DX9_MODE
+			 else if(!bDebugLight || !bDebugLightOnly) {
+#else
+			 else {
+#endif
+                giColor = getRayColor(screenCoords.xy).rgb;
+                
+                float hitB = getBrightness(giColor.rgb);
+                float targetB = getBrightness(targetColor.rgb);
+                if(hitB<targetB && targetB>0.3) {
+                    missRays += targetB*2;
                 }
-                sumAO += saturate(ao);
-                hits+=1.0;
+                hitB = weightLight(giColor.rgb);
+	            if(hitB>bestRay.a) {
+	                bestRay = float4(screenCoords,hitB);
+	            } 
             }
-            
-            
-            mergedGiColor.rgb = max(mergedGiColor.rgb,giColor.rgb);
-            mergedGiColor.a = getBrightness(mergedGiColor.rgb);
+        } else {
+            giColor = getRayColor(screenCoords.xy).rgb;
         }
-    }
+        float b = weightLight(giColor.rgb);
+        if(b>=bestRay.a && !doTargetLight) {
+            bestRay = float4(screenCoords,b);
+        }
+        
+        
+        if(doTargetLight) {
+#if !DX9_MODE
+            giColor.rgb = RGBtoOKL(giColor.rgb);
+            giColor.x /= max(1.0,pow(fGIDistanceAttenuation,8.0)*30*hitPosition.dist);
+            giColor.rgb = OKLtoRGB(giColor.rgb);
+#else
+            giColor.rgb /= max(1.0,pow(fGIDistanceAttenuation,8.0)*30*hitPosition.dist);
+#endif
+        }
+        
+        mergedGiColor.rgb = max(mergedGiColor.rgb,giColor.rgb);
     
-    float2 nextRand2(float2 rand) {
-        return  normalize(frac(abs(rand)*PI)-0.5)*2;
-    }
-    float3 nextRand3(float3 rand) {
-        return  normalize(frac(abs(rand)*PI)-0.5)*2;
     }
 
     void PS_GILightPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outGI : SV_Target0, out float4 outBestRay : SV_Target1) {
@@ -1925,99 +1972,93 @@ namespace DH_UBER_RT_0204 {
             return;            
         }
         
-        float2 scaledCoords = upCoords(coords);
+        coords = upCoords(coords);
         
-        float depth = getDepth(scaledCoords).x;
+        float depth = getDepth(coords).x;
         if(isSky(depth)) {
             outGI = float4(0,0,0,1);
-            outBestRay = float4(scaledCoords,depth,fSkyColor);
+            outBestRay = float4(coords,depth,fSkyColor);
             return;
         }
         
         
-        float3 refWp = getWorldPosition(scaledCoords,depth);
-        float3 refNormal = getNormal(scaledCoords);
+        float3 refWp = getWorldPosition(coords,depth);
+        float3 refNormal = getNormal(coords);
         
-        float4 bestRay = getColorSampler(previousBestRaySampler,coords);
-        bestRay.a = 0;
+        float4 bestRay = 0;
 
         float3 sky = 0.0;
-        float4 mergedGiColor = 0.0;     
+        float3 mergedGiColor = 0.0;     
         
         float sumAO = 0;
         float hits = 0;
         float missRays = 0;
         
 #if TEX_NOISE
-        float3 rand = randomTriple(scaledCoords+0.05*framecount);
+        float3 rand = randomTriple(coords+0.05*framecount);
 #else
-        uint seed = getPixelIndex(scaledCoords,BUFFER_SIZE);
-        float3 rand = randomTriple(scaledCoords,seed);
+        uint seed = getPixelIndex(coords,BUFFER_SIZE);
+        float3 rand = randomTriple(coords,seed);
 #endif
+
         
-
-        int maxRays = iRTMaxRays;
-        if(bDebugLight) {
-            maxRays = bDebugLightOnly ? 1 : maxRays+1;
-        }
         
-        [loop]
-        for(int rays=0;rays<maxRays;rays++) {            
-           
-            bool doTargetLight = bDebugLight && rays==0;
-            rand = nextRand3(rand);
-            rand = normalize(rand-0.5);
-
-            float3 targetWp;
-            float4 targetColor;
-            float3 lightVector;
-            if(doTargetLight) {
-                targetWp = !bDebugLight ? getWorldPosition(bestRay.xy,bestRay.z) : getDebugLightWp();           
-                targetWp += rand*iDebugLightSize*0.9;
-                lightVector = normalize(targetWp-refWp);
-                targetColor = !bDebugLight ? getColorSampler(rayColorSampler,bestRay.xy) :  float4(fDebugLightColor,1);
-            } else {
-                lightVector = rand;
-                lightVector += cross(rand,refNormal);
-                lightVector += refNormal;
-            }
-
-			
-            RTOUT hitPosition = trace(refWp,lightVector,false,doTargetLight,targetWp);
-            if(!bDebugLightOnly && hitPosition.status==RT_MISSED_FAST) {
-                continue;
-            }
-            
-            
-            handleHit(
-                refWp, doTargetLight, targetColor,targetWp, hitPosition, 
-                sky, bestRay, sumAO, hits, mergedGiColor,
-                missRays
-            );
-            
-            
-            if(doTargetLight) {
-                bestRay.a *= 0.1;
-            }
-            
 #if !DX9_MODE
-            if(hitPosition.status != RT_HIT && rays==maxRays-1 && getBrightness(mergedGiColor.rgb)<0.1) {
-            	hitPosition.status = RT_HIT;
-            	refNormal = normalize(lightVector);
-            	handleHit(
-	                refWp, doTargetLight, targetColor,targetWp, hitPosition, 
+        if(bDebugLight) {
+            float3 targetWp = getDebugLightWp() + rand*iDebugLightSize*0.9;
+            float3 lightVector = normalize(targetWp-refWp);
+            float3 targetColor = fDebugLightColor;
+
+            RTOUT hitPosition = traceGItarget(rand.xy,refWp,lightVector,targetWp);
+            if(hitPosition.status!=RT_MISSED_FAST) {
+	            handleHit(
+	                true, targetColor,hitPosition, 
 	                sky, bestRay, sumAO, hits, mergedGiColor,
 	                missRays
 	            );
             }
-#endif
-
-
+            
+            if(bDebugLightOnly) {
+            	outBestRay = bestRay;
+        		outGI = float4(max(mergedGiColor,sky),hits>0 ? saturate(sumAO/hits) : 1.0);
+        		return;
+            }
         }
+#endif
+        
+#if !DX9_MODE
+        int maxRays = iRTMaxRays;
+        
+        [loop]
+        for(int rays=0;rays<maxRays;rays++) {
+#endif
+            rand = nextRand(rand);
+            rand = normalize(rand-0.5);
+
+            float3 lightVector = rand;
+            lightVector += cross(rand,refNormal);
+            lightVector += refNormal;
+			
+            RTOUT hitPosition = traceGI(rand.xy,refWp,lightVector);
+#if !DX9_MODE
+            if(hitPosition.status==RT_MISSED_FAST) {
+                continue;
+            }
+#endif
+            
+            handleHit(
+                false, 0,hitPosition, 
+                sky, bestRay, sumAO, hits, mergedGiColor,
+                missRays
+            );
+#if !DX9_MODE
+        }
+#endif
         
         outBestRay = bestRay;
-        outGI = float4(max(mergedGiColor.rgb,sky),hits>0 ? saturate(sumAO/hits) : 1.0);
+        outGI = float4(max(mergedGiColor,sky),hits>0 ? saturate(sumAO/hits) : 1.0);
     }
+    
     
     float getBorderProximity(float2 coords) {
         float2 borderDists = min(coords,1.0-coords)*BUFFER_SIZE;
@@ -2025,13 +2066,13 @@ namespace DH_UBER_RT_0204 {
         return borderDist<=iHudBorderProtectionRadius ? float(iHudBorderProtectionRadius-borderDist)/iHudBorderProtectionRadius : 0;
     }
     
+    
     void PS_GIFill(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outBestRay : SV_Target) {
 
         if(!isScaledProcessed(coords)) {
             outBestRay = float4(0,0,0,1);
             return;            
         }
-        //float2 scaledCoords = getUpscaledCoords(coords);
 
         float2 pixelSize = ReShade::PixelSize;
         float4 bestRay = getColorSampler(bestRaySampler,coords);
@@ -2045,21 +2086,21 @@ namespace DH_UBER_RT_0204 {
 
         int2 delta;         
         int2 res = floor(BUFFER_SIZE/RESV_SCALE);
-        int maxDist = 8;
-        int count = 0;
-        for(delta.x=-maxDist;delta.x<=maxDist;delta.x+=2) {
-            for(delta.y=-maxDist;delta.y<=maxDist;delta.y+=2) {
-                count++;
+        int maxDist = 4;
+        [loop]
+        for(delta.x=-maxDist;delta.x<=maxDist;delta.x+=1) {
+        	[loop]
+            for(delta.y=-maxDist;delta.y<=maxDist;delta.y+=1) {
                 float d = length(delta);
                 if(d>maxDist) continue;
                 
                 float2 currentCoords = coords + delta*pixelSize*d;
-                rand = nextRand3(rand);
-                currentCoords += cos(rand.xy*2*PI)*0.07*fGIRenderScale;
+                rand = nextRand(rand);
+                currentCoords += (rand.xy-0.5)*0.1*fGIRenderScale*d;
                 if(!isScaledProcessed(currentCoords)) continue;
                 
                 float4 ray = getColorSampler(bestRaySampler,currentCoords);                 
-                if(ray.a>bestRay.a) {
+                if(ray.a>=bestRay.a) {
                     bestRay = ray;
                 }
             }
@@ -2069,62 +2110,52 @@ namespace DH_UBER_RT_0204 {
         
     }
     
-    void PS_GILightPass2(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outGI : SV_Target0, out float4 outBestRay : SV_Target1) {
+    void PS_GILightPass2(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outGI : SV_Target0) {
 
         if(!isScaledProcessed(coords)) {
             outGI = float4(0,0,0,1);
-            outBestRay = float4(0,0,0,1);
             return;            
         }
-        float2 scaledCoords = upCoords(coords);
+        coords = upCoords(coords);
 
-        float depth = getDepth(scaledCoords).x;
+        float depth = getDepth(coords).x;
         if(isSky(depth)) {
             outGI = float4(0,0,0,1);
-            outBestRay = float4(scaledCoords,depth,fSkyColor);
             return;
         }
-     
-        float2 previousCoords = getPreviousCoords(scaledCoords);
-        float2 previousCoordsScaled = previousCoords*fGIRenderScale;
         
-        float4 firstPassFrame = getColorSampler(giPassSampler,coords);
+
                 
-        float3 refWp = getWorldPosition(scaledCoords,depth);
-        float3 refNormal = getNormal(scaledCoords);
+        float3 refWp = getWorldPosition(coords,depth);
+        float3 refNormal = getNormal(coords);
         
-        float firstAO = firstPassFrame.a;
-        float4 mergedGiColor = firstPassFrame;
-        
-        mergedGiColor.a = getBrightness(mergedGiColor.rgb);
+        float3 mergedGiColor = 0;
         
         float hits = 0;
         float sumAO = 0;
         
         float3 sky = 0.0;
-        float4 bestRay;// = getColorSampler(bestRayFillSampler,previousCoords);        
+        float4 bestRay;
         
-        int rays = 0;
         float missRays = 0;
-        
-        float2 subCoords = coords;
                                   
         
 #if TEX_NOISE
-        float3 rand = randomTriple(subCoords+0.05*framecount);
+        float3 rand = randomTriple(coords+0.05*framecount);
 #else
-        uint seed = getPixelIndex(subCoords,BUFFER_SIZE);
-        float3 rand = randomTriple(subCoords,seed);
+        uint seed = getPixelIndex(coords,BUFFER_SIZE);
+        float3 rand = randomTriple(coords,seed);
 #endif
         float2 pixelSize = ReShade::PixelSize;
         
+#if !DX9_MODE
         if(!(bDebugLight && bDebugLightOnly)) {
-            
-            bestRay = getColorSampler(bestRayFillSampler,previousCoordsScaled);
+#endif
+	            
+            bestRay = getColorSampler(bestRayFillSampler,coords*fGIRenderScale);
             bestRay.a = 0;
             
             float3 targetCoords = bestRay.xyz;
-            float4 targetColor = getRayColor(targetCoords.xy);
             
             targetCoords.xy +=  2*pixelSize*rand.yz;
             targetCoords.z = getDepth(targetCoords.xy).x;
@@ -2133,20 +2164,23 @@ namespace DH_UBER_RT_0204 {
             targetCoords.z = getDepth(targetCoords.xy).x;
             
             float3 targetWp = getWorldPosition(targetCoords.xy,targetCoords.z);
-            targetWp += (rand-0.5)*8*(1+fHudBorderProtectionStrength*getBorderProximity(targetCoords.xy));
-            
+            targetWp += rand*8*fHudBorderProtectionStrength*getBorderProximity(targetCoords.xy);
             float3 lightVector = normalize(targetWp-refWp);
             
-            RTOUT hitPosition = trace(refWp,lightVector,false,true,targetWp);
-            if(hitPosition.status!=RT_MISSED_FAST) {
-	            targetColor = getRayColor(targetCoords.xy);
-            	handleHit(
-	                refWp, true, targetColor, targetWp, hitPosition, 
-	                sky, bestRay, sumAO, hits, mergedGiColor,
-	                missRays
-	            );
+            float d = dot(refNormal,lightVector);
+            if(d>0) {
+                RTOUT hitPosition = traceGItarget(rand.xy,refWp,lightVector,targetWp);
+	            if(hitPosition.status!=RT_MISSED_FAST) {
+		            float3 targetColor = getRayColor(targetCoords.xy).rgb;
+	            	handleHit(
+		                true, targetColor, hitPosition, 
+		                sky, bestRay, sumAO, hits, mergedGiColor,
+		                missRays
+		            );
+	            }
+            } else {
+            	hits++;
             }
-            rays++;
                 
             
 #if !DX9_MODE
@@ -2155,17 +2189,15 @@ namespace DH_UBER_RT_0204 {
             step.y *= float(BUFFER_WIDTH)/BUFFER_HEIGHT;
             
             float2 searchCoords = 0;
-            float dist = 0;
             
             float currentIndex = 0;
+            
+            [loop]
             for(searchCoords.y=step.y*0.5;searchCoords.y<=1.0-step.y*0.5;searchCoords.y+=step.y) {
-                for(searchCoords.x=step.x*0.5;searchCoords.x<=1.0-step.x*0.5;searchCoords.x+=step.x) {
-                    rays++;
-        #if TEX_NOISE
-                    rand = (randomCouple(subCoords+(0.05*(rays+framecount)))-0.5);
-        #else
-                    rand = (randomTriple(subCoords,seed).xy-0.5);
-        #endif
+    			[loop]            
+				for(searchCoords.x=step.x*0.5;searchCoords.x<=1.0-step.x*0.5;searchCoords.x+=step.x) {
+
+        			rand = nextRand(rand);
 
                     float2 currentCoords = searchCoords+step*rand.xy;
                     
@@ -2177,40 +2209,26 @@ namespace DH_UBER_RT_0204 {
                     
                     float3 targetWp = getWorldPosition(targetCoords.xy,targetCoords.z);
                     
-                    targetWp += rand*8*fHudBorderProtectionStrength*getBorderProximity(targetCoords.xy);
-                    targetCoords.xy = getScreenPosition(targetCoords).xy;
-                    
                     float3 lightVector = normalize(targetWp-refWp);
-                    
-                    
-                    targetCoords = getScreenPosition(targetWp);
-                    if(!inScreen(targetCoords.xy)) {
-                        continue;
-                    }
-                    
-                    float3 targetNormal = getNormal(targetCoords.xy);
-                    if(!isSky(targetCoords.z) && length(targetNormal+lightVector)>1.4) {
-                        continue;
-                    }
                     
                     {
                         float d = dot(refNormal,lightVector);
-                        if(d<=0.1) {
+                        if(d<0) {
                             hits++;
                             continue;
                         }
-                        d = dot(targetNormal,lightVector);
-                        if(d>=0.1) {
-                            hits++;
-                            continue;
-                        }
+                        float3 targetNormal = getNormal(targetCoords.xy);
+	                    if(!isSky(targetCoords.z) && length(targetNormal+lightVector)>1.4) {
+	                        continue;
+	                    }
                     }
                     
-                    RTOUT hitPosition = trace(refWp,lightVector,false,true,targetWp);
+                    RTOUT hitPosition = traceGItarget(rand.xy,refWp,lightVector,targetWp);
                     if(hitPosition.status!=RT_MISSED_FAST) {
-	                    float4 targetColor = getRayColor(targetCoords.xy);
+	                    float3 targetColor = getRayColor(targetCoords.xy).rgb;
+	                    
 	                    handleHit(
-	                        refWp, true, targetColor, targetWp, hitPosition, 
+	                        true, targetColor, hitPosition, 
 	                        sky, bestRay, sumAO, hits, mergedGiColor,
 	                        missRays
 	                    );
@@ -2222,10 +2240,15 @@ namespace DH_UBER_RT_0204 {
                 
                 
             }
-            
-#endif
+
         }
+#endif
         
+        
+        float4 firstPassFrame = getColorSampler(giPassSampler,coords*fGIRenderScale);
+        mergedGiColor.rgb = max(mergedGiColor.rgb,firstPassFrame.rgb);
+        float firstAO = firstPassFrame.a;
+                
         sumAO += firstAO*iRTMaxRays;
         hits += iRTMaxRays;
         float ao = hits>0 ? sumAO/hits : 1;
@@ -2236,13 +2259,12 @@ namespace DH_UBER_RT_0204 {
         }
         
         mergedGiColor.rgb = max(mergedGiColor.rgb,sky);
-        {
-            float3 fpOKL = RGBtoOKL(firstPassFrame.rgb);
-            float r = 1.0-smoothstep(0,1,fpOKL.x);
-            mergedGiColor.rgb = saturate(mergedGiColor.rgb*r+firstPassFrame.rgb);
-        }
         
-        outBestRay = float4(bestRay.xyz,1);
+        float3 fpOKL = RGBtoOKL(firstPassFrame.rgb);
+        float r = 1.0-smoothstep(0,1,fpOKL.x);
+        mergedGiColor.rgb = saturate(mergedGiColor.rgb*r+firstPassFrame.rgb);
+        
+        
         outGI = float4(mergedGiColor.rgb,ao);
         
         
@@ -2267,6 +2289,131 @@ namespace DH_UBER_RT_0204 {
 
         return ssr.rgb*coef;
             
+    }
+
+	RTOUT traceSSR(inout float2 rand, float3 refWp,float3 incrementVector) {
+    
+        RTOUT result;
+        result.status = RT_MISSED;
+        
+        float3 currentWp = refWp;
+        
+        incrementVector = normalize(incrementVector)*0.1;
+                
+        currentWp += incrementVector;
+        float3 screenCoords = getScreenPosition(currentWp);
+        
+        result.drtf = getDRTF(screenCoords.xy);
+        float3 screenWp = getWorldPosition(screenCoords.xy,result.drtf.x);
+        
+        bool isHit = hit(currentWp, screenWp, result.drtf,0);
+        
+        if(isHit) {
+            float3 hitNormal = getNormal(screenCoords.xy);
+            incrementVector = reflect(incrementVector,hitNormal);
+            isHit = false;
+        }        
+        
+        float3 refVector = normalize(incrementVector);
+        incrementVector = refVector;
+        
+        int stepBehind = 0;
+        bool behind = false;
+        float3 behindWp = 0;
+#if !DX9_MODE
+        float3 beforeBehind = 0;
+        float3 previousWp = refWp;
+#endif
+ 
+        int step = -1;
+        incrementVector *= 0.1;
+        
+        float maxDist = sqrt(BUFFER_WIDTH*BUFFER_WIDTH+BUFFER_HEIGHT*BUFFER_HEIGHT);
+        int maxSteps = 256;
+
+        float dist = 0;
+        
+        while(step<maxSteps*2 && dist<maxDist) {
+            step++;
+            if(step>maxSteps) incrementVector *= 1.05;
+
+            dist += length(incrementVector);
+            currentWp += incrementVector;
+            screenCoords = getScreenPosition(currentWp);
+            
+            if(!inScreen(screenCoords)) break;
+            
+            
+            result.drtf = getDRTF(screenCoords.xy);
+            screenWp = getWorldPosition(screenCoords.xy,result.drtf.x);
+            behind = currentWp.z>screenWp.z;
+            
+            if(behind) {
+                stepBehind++;
+                if(stepBehind==1) {
+                    behindWp = screenWp;
+#if !DX9_MODE
+                    beforeBehind = previousWp;
+#endif
+                }
+            }
+            
+            if(isSky(result.drtf.x)) {
+                result.status = RT_HIT_SKY;
+                result.wp = currentWp;
+            }
+            
+            isHit = hit(currentWp, screenWp, result.drtf,behindWp);
+            bool isHitBehind = isHit && (stepBehind>1 || (currentWp.z>=screenWp.z+50 && result.drtf.z>=50));
+        
+            if(isHit) {
+                result.status = isHitBehind ? RT_HIT_BEHIND : RT_HIT;
+#if !DX9_MODE
+                result.wp = result.status==RT_HIT_BEHIND ? beforeBehind : currentWp;
+#else
+				result.wp = result.status==RT_HIT_BEHIND ? behindWp : currentWp;
+#endif
+                if(result.drtf.y>=0.1) result.status = RT_HIT;
+                return result;
+            }
+            
+#if !DX9_MODE
+            if(iRTPrecision==1) {
+                rand = nextRand(rand);
+                if(step<=maxSteps) {
+                    incrementVector = refVector*(1.0+rand.x);
+                }
+            } else 
+#endif
+			if(step<=maxSteps) {
+                float2 nextWp = float2(
+                    refVector.x>0 ? ceil(currentWp.x+1) : floor(currentWp.x-1),
+                    refVector.y>0 ? ceil(currentWp.y+1) : floor(currentWp.y-1)
+                );
+                
+                float2 dist = abs(nextWp.xy-currentWp.xy);
+                
+                // On prend la plus petite distance positive
+                float minDist = min(dist.x, dist.y);
+                incrementVector = refVector*max(0.01,minDist*(1.0+result.drtf.x*2.5));
+            }
+            
+            
+            if(!behind) {
+                stepBehind = 0;
+            }
+            
+#if !DX9_MODE
+            previousWp = currentWp;
+#endif
+        }
+
+        if(incrementVector.z>0 && inScreen(getScreenPosition(currentWp).xy)) {
+            result.status = RT_HIT;
+            result.wp = currentWp;
+        }
+        
+        return result;
     }
 
     void PS_SSRLightPass(float4 vpos : SV_Position, float2 coords : TexCoord, out float4 outColor : SV_Target0) {
@@ -2301,7 +2448,8 @@ namespace DH_UBER_RT_0204 {
                            
             float3 lightVector = normalize(reflect(targetWp,targetNormal));
             
-            RTOUT hitPosition = trace(targetWp,lightVector,true,false,0);
+            float2 rand = (coords*PI)%1;
+            RTOUT hitPosition = traceSSR(rand,targetWp,lightVector);
             
             float3 screenPosition = getScreenPosition(hitPosition.wp.xyz);
                 
@@ -2365,7 +2513,6 @@ namespace DH_UBER_RT_0204 {
 		float d;
         // Normal weight
         if(motionMask<1) {
-        
             float3 normal = getNormal(currentScaledCoords);
 			d = dot(normal,refNormal);
             nw = saturate(d);
@@ -2417,7 +2564,7 @@ namespace DH_UBER_RT_0204 {
 		float2 previousCoords, float4 previousAccu,
 		bool firstPass
 	) {
-		if(!firstPass && motionMask<0.1) {
+		if(!firstPass && motionMask<1) {
             float2 depth = getColorSampler(previousDepthSampler,previousCoords).xy;            
             float4 curGiAo = previousAccu;
             curGiAo.rgb = RGBtoOKL(curGiAo.rgb);
@@ -2687,11 +2834,10 @@ namespace DH_UBER_RT_0204 {
         	giAO = getColorSamplerLod(giSmooth2PassSampler,coords,2.0);
         }
         
-        float motionMask = getColorSampler(motionMaskSampler,coords).x;
         
 
-        float2 op = 1.0/float2(iGIFrameAccu,iAOFrameAccu);
-        if(motionMask.x>0 && getBrightness(giAO.rgb)>0.1) {
+        float motionMask = getColorSampler(motionMaskSampler,coords).x;
+        if(motionMask>0) {
             giAO = getColorSamplerLod(giSmooth2PassSampler,coords,3);
             outGI = giAO;
             outSSR = bSSR ? getColorSampler(ssrPassSampler,coords*fSSRRenderScale) : 0;
@@ -2703,6 +2849,7 @@ namespace DH_UBER_RT_0204 {
         float centerDist = distance(0.5*BUFFER_SIZE,previousCoords*BUFFER_SIZE);
         motionDist *= (1+centerDist*50.0/BUFFER_WIDTH);
         
+        float2 op = 1.0/float2(iGIFrameAccu,iAOFrameAccu);
         op = lerp(op,1,saturate(motionDist/256));
         op = saturate(op);
         
@@ -2861,14 +3008,16 @@ namespace DH_UBER_RT_0204 {
         float2 minMaxW = 0;
         
         float2 currentCoords = 0;
-        float2 rand = randomCouple(coords);
         
         float2 pixelSize = ReShade::PixelSize;
         float2 stepSize = (BUFFER_SIZE/8.0)*pixelSize;
         
+        float2 rand = randomCouple(coords);
+        [loop]
         for(currentCoords.x=stepSize.x*0.5;currentCoords.x<=1.0-stepSize.x*0.5;currentCoords.x+=stepSize.x) {
-            for(currentCoords.y=stepSize.y*0.5;currentCoords.y<=1.0-stepSize.y*0.5;currentCoords.y+=stepSize.y) {
-                rand = nextRand2(rand);
+    		[loop]         
+			for(currentCoords.y=stepSize.y*0.5;currentCoords.y<=1.0-stepSize.y*0.5;currentCoords.y+=stepSize.y) {
+                rand = nextRand(rand);
                 float2 c = currentCoords+(rand-0.5)*stepSize;
                
                 float depth = getDepth(c).x;
@@ -2913,6 +3062,8 @@ namespace DH_UBER_RT_0204 {
     void PS_DisplayResult(in float4 position : SV_Position, in float2 coords : TEXCOORD, out float4 outPixel : SV_Target0)
     {        
         float3 result = 0;
+        
+#if !DX9_MODE
         if(bDebugLight) {
             if(distance(coords,fDebugLightPosition.xy)<2*ReShade::PixelSize.x) {
                 float colorBrightness = getBrightness(result);
@@ -2920,6 +3071,7 @@ namespace DH_UBER_RT_0204 {
                 return;
             }
         }
+#endif
         
         
         if(iDebug==DEBUG_OFF) {
@@ -3113,8 +3265,10 @@ namespace DH_UBER_RT_0204 {
             if(iDebugPass==4) result = drtf.z*0.004;
             
             result = drtf.z*0.004;
-            //result = getColorSampler(previousBestRaySampler,coords).rgb;
-      
+            
+            float4 brs = getColorSampler(bestRayFillSampler,coords*fGIRenderScale);
+            result = brs.a>0 ? getRayColor(brs.xy).rgb : 0;
+            
         }
         
         outPixel = float4(result,1.0);
@@ -3124,11 +3278,11 @@ namespace DH_UBER_RT_0204 {
 // TEHCNIQUES 
     
     technique DH_UBER_RT <
-        ui_label = "DH_UBER_RT 0.20.4";
+        ui_label = "DH_UBER_RT 0.20.5";
         ui_tooltip = 
             "_____________ DH_UBER_RT _____________\n"
             "\n"
-            " ver 0.20.4 (2025-02-20)  by AlucardDH\n"
+            " ver 0.20.5 (2025-02-27)  by AlucardDH\n"
 #if DX9_MODE
             "         DX9 limited edition\n"
 #endif
@@ -3170,6 +3324,7 @@ namespace DH_UBER_RT_0204 {
             RenderTarget = normalTex;
             RenderTarget1 = depthTex;
         }
+        
 
         // GI
         pass {
@@ -3215,7 +3370,6 @@ namespace DH_UBER_RT_0204 {
             VertexShader = PostProcessVS;
             PixelShader = PS_GILightPass2;
             RenderTarget = giPass2Tex;
-            RenderTarget1 = previousBestRayTex;
         }
         
         // SSR
