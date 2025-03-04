@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// DH_UBER_RT 0.20.5 (2025-02-27)
+// DH_UBER_RT 0.20.6 (2025-03-04)
 //
 // This shader is free, if you paid for it, you have been ripped and should ask for a refund.
 //
@@ -102,7 +102,7 @@ namespace Deferred {
 #endif
 
 
-namespace DH_UBER_RT_0205 {
+namespace DH_UBER_RT_0206 {
 
 // Textures
 
@@ -2965,23 +2965,21 @@ namespace DH_UBER_RT_0205 {
         float avgB = getAverageBrightness();
 
         result += originalColorBrightness*gi*fGIDarkMerging*(1.0-pow(originalColorBrightness,0.2));
-        
-        if(fGIHueBiais>0) {
+         
+
+		if(fGIHueBiais>0) {
+        	float3 resultHSV = RGBtoHSV(saturate(result));
+            float3 biaised = resultHSV;
+            biaised.x = giHSV.x;
+            biaised = HSVtoRGB(biaised);
+            float r = giHSV.y*giHSV.z*(1.0-resultHSV.y)*max(pow((resultHSV.z-0.75)*2,4),pow((resultHSV.z-0.25)*2,4))*fGIHueBiais;
             
-            float3 c = giHSV;
-            c.z = colorHSV.z;
-            c = HSVtoRGB(c);
-                
-            float r = lerp(0,1,c.x);
-            r = 1.0-(r+(1.0-r))*0.5;
-            result = oklLerp(result,c,saturate((1.0-sqrt(colorHSV.y))*2*fGIHueBiais*getPureness(gi)));
+            result = lerp(result,biaised,saturate(r));
         }
-        
-        float giBrightness =  getBrightness(gi);            
         
         result += pow(result,0.25)*gi*saturate(1.0-avgB)*fGIDarkMerging*(1.0-originalColorBrightness);
         result = lerp(result,(1.0-fGILightMerging)*result + fGILightMerging*gi*result,saturate(originalColorBrightness*giHSV.z*4*fGILightMerging));
-         
+	        
         
         // Overbright
         if(!reinhardFirstPass && fGIOverbrightToWhite>0) {
@@ -3278,11 +3276,11 @@ namespace DH_UBER_RT_0205 {
 // TEHCNIQUES 
     
     technique DH_UBER_RT <
-        ui_label = "DH_UBER_RT 0.20.5";
+        ui_label = "DH_UBER_RT 0.20.6";
         ui_tooltip = 
             "_____________ DH_UBER_RT _____________\n"
             "\n"
-            " ver 0.20.5 (2025-02-27)  by AlucardDH\n"
+            " ver 0.20.6 (2025-03-04)  by AlucardDH\n"
 #if DX9_MODE
             "         DX9 limited edition\n"
 #endif
