@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////
 //
-// DH_UBER_MASK 0.4.0
+// DH_UBER_MASK 0.4.1
 //
 // This shader is free, if you paid for it, you have been ripped and should ask for a refund.
 //
@@ -155,6 +155,11 @@ namespace DH_UBER_MASK {
         ui_label = "Enable";
     > = false;
     
+    uniform bool bEdgeMaskReverse <
+        ui_category = "Edge mask";
+        ui_label = "Reverse mask";
+    > = false;
+    
     uniform int iEdgeRadius <
         ui_type = "slider";
         ui_category = "Edge mask";
@@ -289,6 +294,7 @@ namespace DH_UBER_MASK {
 		} else {
 			result = sqrt(minEdgeDistance)/(iEdgeRadius+1);
 		}
+		if(bEdgeMaskReverse) result = 1.0-result;
 		
         outPixel = float4(result,1);
     }
@@ -335,7 +341,7 @@ namespace DH_UBER_MASK {
 // TEHCNIQUES 
     
     technique DH_UBER_MASK_BEFORE<
-        ui_label = "DH_UBER_MASK 0.4.0 BEFORE";
+        ui_label = "DH_UBER_MASK 0.4.1 BEFORE";
     > {
         pass {
             VertexShader = PostProcessVS;
@@ -352,7 +358,7 @@ namespace DH_UBER_MASK {
     }
 
     technique DH_UBER_MASK_AFTER<
-        ui_label = "DH_UBER_MASK 0.4.0 AFTER";
+        ui_label = "DH_UBER_MASK 0.4.1 AFTER";
     > {
         pass {
             VertexShader = PostProcessVS;
